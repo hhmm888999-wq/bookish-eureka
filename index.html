@@ -1168,7 +1168,7 @@ function showReceipt(o,fromList){
 // ---------- Kitchen ----------
 let kst='all',ktimer=null;
 const KITCHEN_PIN='8020';
-let kitchenOK=true; // kitchen code removed
+let kitchenOK=false;try{kitchenOK=sessionStorage.getItem('yana-k')==='1'}catch(e){}
 function renderKitchenLogin(){
   const app=document.getElementById('app');let pin='';
   const draw=(err)=>{
@@ -1180,7 +1180,7 @@ function renderKitchenLogin(){
       <div class="pinpad">${['1','2','3','4','5','6','7','8','9','del','0','ok'].map(k=>`<button data-k="${k}" class="${k==='del'||k==='ok'?'fn':''} num" aria-label="${k==='del'?L('مسح','Delete'):k==='ok'?L('دخول','Enter'):k}">${k==='del'?'⌫':k==='ok'?L('دخول','Enter'):k}</button>`).join('')}</div>
     </div>`;
   };
-  const check=()=>{if(pin===KITCHEN_PIN||managerBy(pin)){kitchenOK=true;try{sessionStorage.setItem('yana-k','1')}catch(e){}renderKitchen()}else{pin='';draw(true)}};
+  const check=()=>{if(pin===KITCHEN_PIN){kitchenOK=true;try{sessionStorage.setItem('yana-k','1')}catch(e){}renderKitchen()}else{pin='';draw(true)}};
   draw(false);
   app.onclick=e=>{const b=e.target.closest('[data-k]');if(!b)return;const k=b.dataset.k;
     if(k==='del')pin=pin.slice(0,-1);else if(k==='ok'){check();return}else if(pin.length<4)pin+=k;
@@ -1195,7 +1195,7 @@ function renderKitchen(){
 }
 function renderStation(){
   const app=document.getElementById('app');const isBar=kst==='b';
-  app.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h2>${isBar?L('شاشة البار','Bar screen'):L('شاشة المطبخ','Kitchen screen')}</h2></div><p class="sub">${isBar?L('طلبات المشروبات توصل هنا فور إرسال الطلب، ومعها مشروبات الفطور الفرنسي. الأخضر أقل من 8 دقائق، والبرتقالي حتى 15، والأحمر متأخر.','Drink orders arrive here as soon as an order is sent, including French breakfast drinks. Green is under 8 minutes, orange up to 15, red is late.'):L('طلبات الأكل توصل هنا فور إرسال الطلب. الأخضر أقل من 8 دقائق، والبرتقالي حتى 15، والأحمر متأخر.','Food orders arrive here as soon as an order is sent. Green is under 8 minutes, orange up to 15, red is late.')}</p>
+  app.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h2>${isBar?L('شاشة البار','Bar screen'):L('شاشة المطبخ','Kitchen screen')}</h2>${isBar?'':`<button class="btn ghost sm" id="klogout">${L('تسجيل خروج','Sign out')}</button>`}</div><p class="sub">${isBar?L('طلبات المشروبات توصل هنا فور إرسال الطلب، ومعها مشروبات الفطور الفرنسي. الأخضر أقل من 8 دقائق، والبرتقالي حتى 15، والأحمر متأخر.','Drink orders arrive here as soon as an order is sent, including French breakfast drinks. Green is under 8 minutes, orange up to 15, red is late.'):L('طلبات الأكل توصل هنا فور إرسال الطلب. الأخضر أقل من 8 دقائق، والبرتقالي حتى 15، والأحمر متأخر.','Food orders arrive here as soon as an order is sent. Green is under 8 minutes, orange up to 15, red is late.')}</p>
    <div class="kcols"><div class="kgrid" id="kgrid"></div><div class="ready" id="ready"></div></div>`;
   const lo=document.getElementById('klogout');if(lo)lo.onclick=()=>{kitchenOK=false;try{sessionStorage.removeItem('yana-k')}catch(e){}renderKitchen()};
   drawK();clearInterval(ktimer);ktimer=setInterval(()=>{if(location.hash==='#kitchen'||location.hash==='#bar')drawK()},15000);
