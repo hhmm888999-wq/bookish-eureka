@@ -5,6 +5,19 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#243c29">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+window.YANA_FB={
+  apiKey:"AIzaSyBMtxjcPrZmnbrTkNdmug3YF3qSkAlW_wo",
+  authDomain:"yana-pos.firebaseapp.com",
+  projectId:"yana-pos",
+  storageBucket:"yana-pos.firebasestorage.app",
+  messagingSenderId:"264509055194",
+  appId:"1:264509055194:web:150fae6d1525c3ee4e45e3"
+};
+</script>
 </head>
 <body>
 <title>يانا كاشير</title>
@@ -331,6 +344,8 @@ table.sheet-t{width:100%;border-collapse:collapse;font-size:14px;min-width:560px
 .syncdot{font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px;opacity:.95}
 .syncdot::before{content:"";width:9px;height:9px;border-radius:50%;background:#9aa89d}
 .syncdot.on::before{background:#6cc189}.syncdot.wait::before{background:#e3b45a}.syncdot.bad::before{background:#ec8378}
+#loginwall{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px max(16px,env(safe-area-inset-left,0px))}
+.lw-box{width:min(380px,100%);background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:24px}
 .langbtn{border:1px solid currentColor;background:none;color:inherit;border-radius:999px;padding:6px 14px;font-weight:600;font-size:13.5px;opacity:.9}
 .langbtn:hover{opacity:1;background:rgba(255,255,255,.08)}
 .addform{display:grid;grid-template-columns:2fr 1.4fr 1fr 1fr auto;gap:8px;margin-top:14px;align-items:end}
@@ -541,8 +556,8 @@ async function flushWrites(path){
   while(q.next){const op=q.next;q.next=null;const ref=DB.doc(path);
     for(let tries=0;tries<2;tries++){try{if(op.op==='del')await ref.delete();else if(op.op==='update')await ref.update(op.data);else await ref.set(op.data);setSync('on');break}
       catch(e){if(e&&e.code==='unavailable'&&tries===0){await new Promise(r=>setTimeout(r,400+Math.random()*600));continue}
-        if(e&&e.code==='invalid_argument'&&op.op==='update'){/* doc missing: write it whole */const o=S.orders.find(x=>'orders/'+x.id===path);if(o){try{await ref.set(clone(o))}catch(_){}}}
-        else setSync(e&&e.code==='quota_exceeded'?'full':'error');break}}}
+        if(e&&(e.code==='invalid_argument'||e.code==='not-found')&&op.op==='update'){/* doc missing: write it whole */const o=S.orders.find(x=>'orders/'+x.id===path);if(o){try{await ref.set(clone(o))}catch(_){}}}
+        else setSync(e&&(e.code==='quota_exceeded'||e.code==='resource-exhausted')?'full':'error');break}}}
   q.running=false;
 }
 function writeOrder(o,partial){save();queueWrite('orders/'+o.id,partial?{op:'update',data:partial}:{op:'set',data:clone(o)})}
@@ -556,6 +571,7 @@ function applyMeta(m){
 const maxNo=()=>S.orders.reduce((m,o)=>Math.max(m,o.no||0),100);
 async function nextNo(){
   if(!DB){S.no=Math.max(S.no,maxNo())+1;return S.no}
+  if(FDB){try{const ref=FDB.doc('meta/counter');const n=await FDB.runTransaction(async tx=>{const s=await tx.get(ref);const cur=s.exists?((s.data()||{}).no||0):0;const v=Math.max(cur,S.no,maxNo())+1;tx.set(ref,{no:v});return v});S.no=n;return n}catch(e){S.no=Math.max(S.no,maxNo())+1;return S.no}}
   const ref=DB.doc('meta/counter');
   for(let i=0;i<8;i++){
     const r=await ref.acquire({holder:DEV,ttlMs:4000}).catch(()=>({acquired:false}));
@@ -580,25 +596,69 @@ function refreshView(kind){
     const tk=document.getElementById('ticket');if(tk&&kind==='counter'&&!typing)drawTicket();return}
   if((v==='reports'||v==='sales'||v==='menu')&&!modal&&!typing)route(true);
 }
+let FDB=null;
 async function connectDB(){
+  if(window.YANA_FB){startFirebase();return}
   let db=null;
   try{db=await (window.claude&&window.claude.use?window.claude.use('db'):null)}catch(e){db=null}
   if(!db){setSync('local');return}
+  startSync(db,2000);
+}
+// ---------- Firebase (when the app runs on its own website) ----------
+const SHOP_EMAIL='pos@yana.com';
+function fbAdapter(fdb){
+  const wrap=ref=>({path:ref.path,get:()=>ref.get(),set:d=>ref.set(d),update:d=>ref.update(d),delete:()=>ref.delete(),onSnapshot:(n,e)=>ref.onSnapshot(n,e)});
+  return {doc:p=>wrap(fdb.doc(p)),collection:p=>fdb.collection(p)};
+}
+let fbStarted=false;
+function startFirebase(){
+  if(!window.firebase){setSync('error');return}
+  if(!firebase.apps.length)firebase.initializeApp(window.YANA_FB);
+  const fdb=firebase.firestore();
+  try{fdb.enablePersistence({synchronizeTabs:true}).catch(()=>{})}catch(e){}
+  firebase.auth().onAuthStateChanged(u=>{
+    if(u){hideLogin();if(!fbStarted){fbStarted=true;FDB=fdb;startSync(fbAdapter(fdb),800)}}
+    else{showLogin()}
+  });
+}
+function showLogin(){
+  let el=document.getElementById('loginwall');
+  if(!el){el=document.createElement('div');el.id='loginwall';document.body.appendChild(el)}
+  el.innerHTML=`<div class="lw-box" role="dialog" aria-modal="true" aria-labelledby="lwt">
+    <div class="logo" style="color:var(--brand)">يانا<small>BAKERY &amp; CAFE</small></div>
+    <h2 id="lwt" style="margin-top:14px">${L('تسجيل دخول الجهاز','Sign in this device')}</h2>
+    <p class="sub">${L('مرة وحدة لكل جهاز. بعدها يبقى الجهاز داخل.','Once per device. It stays signed in after that.')}</p>
+    <form id="lwf">
+      <div class="field"><label for="lwe">${L('البريد','Email')}</label><input id="lwe" type="email" autocomplete="username" value="${SHOP_EMAIL}" dir="ltr"></div>
+      <div class="field"><label for="lwp">${L('كلمة المرور','Password')}</label><input id="lwp" type="password" autocomplete="current-password" dir="ltr" required></div>
+      <p class="pinerr" id="lwerr" hidden></p>
+      <button class="btn crust big" type="submit" style="width:100%;margin-top:14px" id="lwb">${L('دخول','Sign in')}</button>
+    </form></div>`;
+  el.hidden=false;
+  document.getElementById('lwf').onsubmit=async e=>{e.preventDefault();const b=document.getElementById('lwb'),er=document.getElementById('lwerr');b.disabled=true;er.hidden=true;
+    try{await firebase.auth().signInWithEmailAndPassword(document.getElementById('lwe').value.trim(),document.getElementById('lwp').value)}
+    catch(err){const c=(err&&err.code)||'';er.textContent=/network/.test(c)?L('ما فيه اتصال بالإنترنت.','No internet connection.'):/too-many/.test(c)?L('محاولات كثيرة، انتظر شوي وجرب.','Too many attempts. Wait a little and try again.'):L('البريد أو كلمة المرور غير صحيحة.','Wrong email or password.');er.hidden=false;b.disabled=false}};
+  setTimeout(()=>{const p=document.getElementById('lwp');if(p)p.focus()},50);
+}
+function hideLogin(){const el=document.getElementById('loginwall');if(el)el.hidden=true}
+function startSync(db,orderLimit){
   DB=db;setSync('connecting');
+  (async()=>{
   try{
     const ms=await db.doc('meta/state').get();
     if(!ms.exists){await db.doc('meta/state').set(metaBody());for(const o of S.orders){try{await db.doc('orders/'+o.id).set(clone(o))}catch(e){}}}
     else applyMeta(clone(ms.data()));
-  }catch(e){DB=null;setSync('local');return}
+  }catch(e){DB=null;setSync(FDB?'error':'local');return}
   lastDayOpen=dayOpen();route(true);
   db.doc('meta/state').onSnapshot(s=>{if(!s.exists)return;applyMeta(clone(s.data()));refreshView('meta')},()=>setSync('error'));
   db.doc('meta/counter').onSnapshot(s=>{if(!s.exists)return;const n=(s.data()||{}).no||0;if(n>S.no){S.no=n;save();refreshView('counter')}},()=>{});
-  db.collection('orders').orderBy('t','desc').limit(2000).onSnapshot(q=>{
+  db.collection('orders').orderBy('t','desc').limit(orderLimit).onSnapshot(q=>{
     S.orders=q.docs.map(d=>clone(d.data())).reverse();
     // an order whose stations are all done is ready, whichever device finished last
     S.orders.forEach(o=>{if(o.status==='open'&&o.kds&&Object.keys(o.kds).length&&Object.values(o.kds).every(v=>v==='ready')){o.status='ready';o.readyAt=o.readyAt||Date.now();queueWrite('orders/'+o.id,{op:'update',data:{status:'ready',readyAt:o.readyAt}})}});
     S.no=Math.max(S.no,maxNo());save();setSync('on');refreshView('orders');
   },()=>setSync('error'));
+  })();
 }
 function baseItems(){
   const arr=[];
@@ -1231,6 +1291,7 @@ function renderMenu(){
   const byCat=CATS.map(c=>({c,items:list.filter(i=>i.cat===c.id)})).filter(x=>x.items.length);
   app.innerHTML=`<h2>${L('إدارة المنيو','Menu management')}</h2><p class="sub">${EN()?`<span class="num">${allItems().length}</span> items from the Yana menu. Changes here show up in the cashier right away.`:`<span class="num">${allItems().length}</span> صنف من منيو يانا. أي تعديل هنا يظهر فوراً في الكاشير.`}</p>
   <div class="panel" style="margin-bottom:16px">
+   ${FDB?`<div class="toolbar" style="margin:0 0 10px"><span style="font-size:13.5px;color:var(--muted)">${L('هذا الجهاز مسجّل دخول','This device is signed in')}</span><button class="btn ghost sm" id="fbout" type="button">${L('تسجيل خروج الجهاز','Sign this device out')}</button></div>`:''}
    <div class="toolbar" style="margin:0"><label for="tcount" style="font-size:14px;font-weight:600">${L('عدد الطاولات في المحل','Number of tables')}</label><input id="tcount" type="number" min="1" max="60" value="${tableCount()}" style="width:80px"></div>
   </div>
   <div class="panel">
@@ -1251,6 +1312,7 @@ function renderMenu(){
   </div>`;
   const keepFocus=(id,fn)=>{const pos=document.getElementById(id).selectionStart;fn();const n=document.getElementById(id);n.focus();try{n.setSelectionRange(pos,pos)}catch(e){}};
   document.getElementById('mq').oninput=e=>{mq=e.target.value;keepFocus('mq',renderMenu)};
+  const fo=document.getElementById('fbout');if(fo)fo.onclick=()=>{firebase.auth().signOut();toast(L('تم تسجيل الخروج','Signed out'))};
   document.getElementById('tcount').onchange=e=>{S.tables=Math.min(60,Math.max(1,parseInt(e.target.value)||30));e.target.value=S.tables;saveMeta();toast(L('تم تحديث عدد الطاولات','Table count updated'))};
   document.getElementById('mcat').onchange=e=>{mcat=e.target.value;renderMenu()};
   app.onchange=e=>{const p=e.target.dataset.p,s=e.target.dataset.s;
