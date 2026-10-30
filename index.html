@@ -265,6 +265,11 @@ a.btn[aria-disabled="true"]{opacity:.4;pointer-events:none}
 .qr img,.qr canvas{width:120px;height:120px}
 
 /* kitchen */
+.stafflist{display:grid;gap:8px}
+.srow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.srow input{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--bg)}
+.srow input[data-wn]{flex:1;min-width:120px}
+.srow input[data-wp]{width:90px;text-align:center;letter-spacing:3px}
 .pinbox{max-width:340px;margin:24px auto;text-align:center;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:24px 20px}
 .pindots{display:flex;justify-content:center;gap:14px;margin:8px 0 6px}
 .pindots span{width:16px;height:16px;border-radius:50%;border:2px solid var(--brand)}
@@ -442,6 +447,7 @@ table.sheet-t{width:100%;border-collapse:collapse;font-size:14px;min-width:560px
       <a href="#reports"><span id="n-reports">التقارير</span></a>
     </nav>
     <span class="syncdot off" id="syncdot" role="status">هذا الجهاز فقط</span>
+    <button class="langbtn" id="userbtn" type="button">👤 المدير</button>
     <button class="langbtn" id="langbtn" lang="en">English</button>
   </div>
 </header>
@@ -561,12 +567,12 @@ async function flushWrites(path){
   q.running=false;
 }
 function writeOrder(o,partial){save();queueWrite('orders/'+o.id,partial?{op:'update',data:partial}:{op:'set',data:clone(o)})}
-function metaBody(){return {prices:Object.fromEntries(S.items.map(i=>[i.id,i.price])),off:S.off||{},custom:S.custom||[],tables:S.tables||30,day:S.day||{open:false},days:(S.days||[]).slice(0,120)}}
+function metaBody(){return {prices:Object.fromEntries(S.items.map(i=>[i.id,i.price])),off:S.off||{},custom:S.custom||[],tables:S.tables||30,day:S.day||{open:false},days:(S.days||[]).slice(0,120),staff:staff()}}
 let metaTimer=null;
 function saveMeta(){S.touched=true;save();if(!DB)return;clearTimeout(metaTimer);metaTimer=setTimeout(()=>queueWrite('meta/state',{op:'set',data:metaBody()}),300)}
 function applyMeta(m){
   if(m.prices)S.items.forEach(i=>{if(m.prices[i.id]!=null)i.price=m.prices[i.id]});
-  S.off=clone(m.off||{});S.custom=clone(m.custom||[]);if(m.tables)S.tables=m.tables;S.day=clone(m.day||{open:false});S.days=clone(m.days||[]);save();
+  S.off=clone(m.off||{});S.custom=clone(m.custom||[]);if(m.tables)S.tables=m.tables;S.day=clone(m.day||{open:false});S.days=clone(m.days||[]);if(m.staff)S.staff=clone(m.staff);save();
 }
 const maxNo=()=>S.orders.reduce((m,o)=>Math.max(m,o.no||0),100);
 async function nextNo(){
@@ -714,6 +720,56 @@ async function saveFile(filename,data){
   return {status:'saved'};
 }
 
+// ---------- staff (waiters) ----------
+const staff=()=>{if(!S.staff)S.staff={managerPin:'0000',waiters:[{id:'w1',name:'شهريار',pin:'1122'}]};return S.staff};
+let MODE='manager',WAITER=null;
+try{MODE=localStorage.getItem('yana-mode')||'manager';WAITER=localStorage.getItem('yana-waiter')||null}catch(e){}
+const isWaiterMode=()=>MODE==='waiter';
+const curWaiter=()=>isWaiterMode()&&WAITER?staff().waiters.find(w=>w.id===WAITER)||null:null;
+const WAITER_VIEWS=['pos','ready'];
+function setMode(m,w){MODE=m;WAITER=w||null;try{localStorage.setItem('yana-mode',m);if(w)localStorage.setItem('yana-waiter',w);else localStorage.removeItem('yana-waiter')}catch(e){}applyRole();route()}
+function applyRole(){
+  const wm=isWaiterMode();
+  document.querySelectorAll('#nav a').forEach(a=>{a.hidden=wm&&!WAITER_VIEWS.includes(a.getAttribute('href').slice(1))});
+  const ub=document.getElementById('userbtn');if(!ub)return;
+  const w=curWaiter();
+  ub.textContent=wm?(w?'👤 '+w.name:L('👤 دخول الويتر','👤 Waiter sign-in')):L('👤 المدير','👤 Manager');
+}
+function pinPad(app,{title,sub,onPin,extra,onClick}){
+  let pin='',err=false;
+  const draw=()=>{app.innerHTML=`<div class="pinbox"><h2>${title}</h2><p class="sub">${sub}</p>
+    <div class="pindots" aria-live="polite">${[0,1,2,3].map(i=>`<span class="${i<pin.length?'on':''}"></span>`).join('')}</div>
+    ${err?`<p class="pinerr">${L('الرقم غير صحيح، حاول مرة ثانية.','Wrong code, try again.')}</p>`:''}
+    <div class="pinpad">${['1','2','3','4','5','6','7','8','9','del','0','ok'].map(k=>`<button data-k="${k}" class="${k==='del'||k==='ok'?'fn':''} num" aria-label="${k==='del'?L('مسح','Delete'):k==='ok'?L('دخول','Enter'):k}">${k==='del'?'⌫':k==='ok'?L('دخول','Enter'):k}</button>`).join('')}</div>
+    ${extra||''}</div>`};
+  const check=()=>{if(onPin(pin))return;pin='';err=true;draw()};
+  draw();
+  app.onclick=e=>{if(onClick&&onClick(e))return;const b=e.target.closest('[data-k]');if(!b)return;const k=b.dataset.k;err=false;
+    if(k==='del')pin=pin.slice(0,-1);else if(k==='ok'){check();return}else if(pin.length<4)pin+=k;
+    if(pin.length===4){check();return}draw()};
+  return draw;
+}
+function renderWaiterLogin(){
+  const app=document.getElementById('app');let managerStep=false;
+  const show=()=>{
+    pinPad(app,managerStep?{title:L('دخول المدير','Manager sign-in'),sub:L('اكتب رقم المدير لإلغاء وضع الويتر في هذا الجهاز','Enter the manager code to turn off waiter mode on this device'),onPin:p=>{if(p===staff().managerPin){setMode('manager');toast(L('رجع الجهاز لوضع المدير','Device back in manager mode'));return true}return false},extra:`<button class="btn ghost sm" id="wlback" style="margin-top:14px">${L('رجوع لدخول الويتر','Back to waiter sign-in')}</button>`,onClick:e=>{if(e.target.closest('#wlback')){managerStep=false;show();return true}}}
+      :{title:L('دخول الويتر','Waiter sign-in'),sub:L('اكتب رقم الدخول الخاص فيك','Enter your sign-in code'),onPin:p=>{const w=staff().waiters.find(x=>x.pin===p);if(w){setMode('waiter',w.id);toast(L('أهلاً ','Welcome ')+w.name);return true}return false},extra:`<button class="btn ghost sm" id="wlmgr" style="margin-top:14px">${L('دخول المدير','Manager sign-in')}</button>`,onClick:e=>{if(e.target.closest('#wlmgr')){managerStep=true;show();return true}}});
+  };
+  show();
+}
+function openUserMenu(){
+  const Ly=document.getElementById('layer'),w=curWaiter();
+  Ly.innerHTML=`<div class="scrim" id="scrim"><div class="sheet" role="dialog" aria-modal="true"><div class="sheet-top">${backBtn('umback')}</div>
+    ${isWaiterMode()?`<h3>${w?w.name:L('الويتر','Waiter')}</h3><p class="sub" style="margin-top:6px">${L('هذا الجهاز في وضع الويتر: الكاشير والطلبات الجاهزة فقط.','This device is in waiter mode: cashier and ready orders only.')}</p>
+      <div class="acts"><button class="btn crust" id="umout">${L('تسجيل خروج الويتر','Sign the waiter out')}</button></div>`
+    :`<h3>${L('المدير','Manager')}</h3><p class="sub" style="margin-top:6px">${L('حوّل هذا الجهاز لوضع الويتر. الويتر يدخل برقمه، ويشوف الكاشير والطلبات الجاهزة بس.','Switch this device to waiter mode. Waiters sign in with their code and only see the cashier and ready orders.')}</p>
+      <div class="acts"><button class="btn crust" id="umwaiter">${L('تحويل الجهاز لوضع الويتر','Switch device to waiter mode')}</button></div>`}
+  </div></div>`;
+  Ly.onclick=e=>{if(e.target.id==='scrim'||e.target.closest('#umback')){Ly.innerHTML='';return}
+    if(e.target.closest('#umout')){Ly.innerHTML='';cart=[];otype='';setMode('waiter',null);return}
+    if(e.target.closest('#umwaiter')){Ly.innerHTML='';cart=[];otype='';setMode('waiter',null);location.hash='#pos';return}};
+}
+
 // ---------- business day ----------
 const dayOpen=()=>!!(S.day&&S.day.open);
 const hm=t=>new Date(t).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
@@ -786,8 +842,9 @@ function renderDayStart(){
   app.innerHTML=`<div class="daystart">
     <h2>${L('اليوم مغلق','The day is closed')}</h2>
     <p class="sub">${S.day&&S.day.lastEnd?L('آخر إغلاق: ','Last closed: ')+`<span class="num">${dmy(S.day.lastEnd)} ${hm(S.day.lastEnd)}</span>`:L('ابدأ اليوم عشان تقدر تستقبل الطلبات.','Start the day to take orders.')}</p>
-    <button class="btn crust big" id="startday">${L('بدء اليوم','Start the day')}</button>
+    ${isWaiterMode()?`<p class="hint">${L('اطلب من المدير يبدأ اليوم.','Ask the manager to start the day.')}</p>`:`<button class="btn crust big" id="startday">${L('بدء اليوم','Start the day')}</button>`}
   </div>`;
+  if(isWaiterMode())return;
   document.getElementById('startday').onclick=()=>{S.day={open:true,startAt:Date.now()};saveMeta();toast(L('بدأ اليوم الساعة ','Day started at ')+hm(S.day.startAt));route()};
 }
 
@@ -798,7 +855,7 @@ function renderPOS(){
   const app=document.getElementById('app');
   if(!dayOpen()){renderDayStart();return}
   const ds=daySummary(S.day.startAt,Date.now());
-  app.innerHTML=`<div class="daybar"><span id="daysum">${daySumHTML()}</span><button class="btn ghost sm" id="closeday">${L('إغلاق اليوم','Close the day')}</button></div>
+  app.innerHTML=`<div class="daybar"><span id="daysum">${daySumHTML()}</span>${isWaiterMode()?'':`<button class="btn ghost sm" id="closeday">${L('إغلاق اليوم','Close the day')}</button>`}</div>
   <div class="pos">
    <section style="min-width:0">
     <div id="startp"></div>
@@ -813,7 +870,7 @@ function renderPOS(){
   </div>
   <button class="btn cartbar" id="cartbar"></button>`;
   document.getElementById('q').addEventListener('input',e=>{q=e.target.value;drawGrid()});
-  document.getElementById('closeday').onclick=openCloseDay;
+  const cdb=document.getElementById('closeday');if(cdb)cdb.onclick=openCloseDay;
   document.getElementById('cartbar').onclick=()=>{ticketOpen=true;drawTicket()};
   drawCats();drawGrid();drawTicket();drawStart();
 }
@@ -1021,6 +1078,7 @@ async function placeOrder(){
   if(placing)return;placing=true;
   const btn=document.getElementById('rvok');if(btn){btn.setAttribute('aria-disabled','true');btn.textContent=L('جاري الإرسال…','Sending…')}
   const o={t:Date.now(),type:otype,table:otype==='in'?table:'',appNo:isApp(otype)?appNo:'',lines:cart.map(l=>({id:l.id,name:l.name,cat:l.cat,unit:l.unit,qty:l.qty,mods:l.mods,st:l.st,note:(l.note||'').trim()})),status:'open'};
+  const cw=curWaiter();if(cw){o.by=cw.name;o.byId=cw.id}
   o.no=await nextNo();
   pushOrder(o,true);
   S.touched=true;writeOrder(o);
@@ -1040,7 +1098,7 @@ const typeName=o=>typ(o.type)+(o.table?' · '+L('طاولة ','Table ')+o.table:
 const when=t=>new Date(t).toLocaleString('en-GB',{dateStyle:'short',timeStyle:'short'});
 const lineTxt=l=>l.qty+'× '+nm(l)+(l.mods.length?' ('+modsTxt(l.mods)+')':'')+(l.note?'\n   ✎ '+L('ملاحظة: ','Note: ')+l.note:'');
 function receiptText(o){const vat=o.total*15/115;return [L(SELLER.shopAr,SELLER.shopEn),SELLER.ar,L(SELLER.addrAr,SELLER.addrEn),L('الرقم الضريبي: ','VAT no.: ')+SELLER.vat,L('فاتورة ضريبية مبسطة · طلب #','Simplified tax invoice · Order #')+o.no,when(o.t),'',...o.lines.map(l=>lineTxt(l)+' — '+fmt(l.unit*l.qty)),'',L('الضريبة 15%: ','VAT 15%: ')+fmt(vat),L('الإجمالي: ','Total: ')+fmt(o.total)+' '+CUR(),'',L('شكراً لزيارتكم يانا','Thank you for visiting Yana')].join('\n')}
-function orderText(o){return ['🧾 '+L('طلب جديد #','New order #')+o.no+' — '+L('يانا','Yana'),when(o.t),L('النوع: ','Type: ')+typeName(o),'',...o.lines.map(lineTxt),'',L('الإجمالي: ','Total: ')+fmt(o.total)+' '+CUR()].join('\n')}
+function orderText(o){return ['🧾 '+L('طلب جديد #','New order #')+o.no+' — '+L('يانا','Yana'),when(o.t),L('النوع: ','Type: ')+typeName(o)+(o.by?' · '+L('الويتر: ','Waiter: ')+o.by:''),'',...o.lines.map(lineTxt),'',L('الإجمالي: ','Total: ')+fmt(o.total)+' '+CUR()].join('\n')}
 function readyText(o){return L('أهلاً من يانا! طلبك رقم #'+o.no+' جاهز للاستلام'+'.','Hello from Yana! Your order #'+o.no+' is ready for pickup'+'.')}
 async function receiptPdf(el){
   const canvas=await html2canvas(el,{scale:2,backgroundColor:'#ffffff'});
@@ -1058,7 +1116,7 @@ function showReceipt(o,fromList){
     <div class="receipt" id="rcpt">
       <div class="c"><h5>${L(SELLER.shopAr,SELLER.shopEn)}</h5><div>YANA Bakery &amp; Cafe</div><div class="tiny">${SELLER.ar}</div><div class="tiny">${L(SELLER.addrAr,SELLER.addrEn)}</div><div class="tiny">${L('الرقم الضريبي','VAT no.')}: <span class="num">${SELLER.vat}</span></div><div class="tiny">${L('السجل التجاري','CR no.')}: <span class="num">${SELLER.cr}</span></div><div style="margin-top:6px;font-weight:700">${L('فاتورة ضريبية مبسطة','Simplified Tax Invoice')}</div></div>
       <hr>
-      <table><tr><td>${L('رقم الطلب','Order no.')}</td><td class="num">#${o.no}</td></tr><tr><td>${L('التاريخ','Date')}</td><td class="num">${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</td></tr><tr><td>${L('النوع','Type')}</td><td>${esc(typeName(o))}</td></tr></table>
+      <table><tr><td>${L('رقم الطلب','Order no.')}</td><td class="num">#${o.no}</td></tr><tr><td>${L('التاريخ','Date')}</td><td class="num">${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</td></tr><tr><td>${L('النوع','Type')}</td><td>${esc(typeName(o))}</td></tr>${o.by?`<tr><td>${L('الويتر','Waiter')}</td><td>${esc(o.by)}</td></tr>`:''}</table>
       <hr>
       <table>${o.lines.map(l=>`<tr><td><span class="num">${l.qty}×</span> ${esc(nm(l))}${l.mods.length?`<div class="tiny">${esc(modsTxt(l.mods))}</div>`:''}${l.note?`<div class="tiny">${L('ملاحظة:','Note:')} ${esc(l.note)}</div>`:''}</td><td class="num">${fmt(l.unit*l.qty)}</td></tr>`).join('')}</table>
       <hr>
@@ -1144,7 +1202,7 @@ function drawK(){
   g.innerHTML=cards.map(c=>{const mm=Math.floor(c.mins),ss=Math.floor((c.mins-mm)*60);
     return `<article class="kcard ${c.mins>=15?'c':c.mins>=8?'w':''}">
       <div class="kh"><b class="num">#${c.o.no}</b><span class="tm num">${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}</span></div>
-      <div class="kmeta"><span class="chip">${esc(typeName(c.o))}</span>${c.sts.map(s=>`<span class="chip st-${s}">${stn(s)}</span>`).join('')}<span class="chip ${c.state}">${c.state==='new'?L('جديد','New'):L('قيد التحضير','Preparing')}</span>${Object.keys(c.o.kds).filter(s=>s!==kst).map(s=>`<span class="chip">${stn(s)}: ${c.o.kds[s]==='ready'?L('جاهز','ready'):L('لم يجهز','not ready')}</span>`).join('')}</div>
+      <div class="kmeta"><span class="chip">${esc(typeName(c.o))}</span>${c.o.by?`<span class="chip">👤 ${esc(c.o.by)}</span>`:''}${c.sts.map(s=>`<span class="chip st-${s}">${stn(s)}</span>`).join('')}<span class="chip ${c.state}">${c.state==='new'?L('جديد','New'):L('قيد التحضير','Preparing')}</span>${Object.keys(c.o.kds).filter(s=>s!==kst).map(s=>`<span class="chip">${stn(s)}: ${c.o.kds[s]==='ready'?L('جاهز','ready'):L('لم يجهز','not ready')}</span>`).join('')}</div>
       <ul class="kl">${c.lines.map(l=>`<li><span class="q num">${l.qty}×</span><span>${esc(nm(l))}${l.mods.length?`<small>${esc(modsTxt(l.mods))}</small>`:''}${l.note?`<em class="kn">${L('ملاحظة:','Note:')} ${esc(l.note)}</em>`:''}</span></li>`).join('')}</ul>
       <div class="kact"><button class="btn ${c.state==='new'?'':'crust'}" data-o="${c.o.id}" data-s="${c.sts.join(',')}" data-n="${c.state==='new'?'prep':'ready'}">${c.state==='new'?L('ابدأ التحضير','Start preparing'):L('جاهز','Ready')}</button></div>
     </article>`}).join('')||`<p class="empty" style="grid-column:1/-1">${L('ما فيه طلبات تنتظر التحضير.','No orders waiting.')}</p>`;
@@ -1175,7 +1233,7 @@ function drawReady(){
   el.innerHTML=list.length?`<div class="rdgrid">${list.map(o=>{const m=Math.max(0,Math.floor((now-(o.readyAt||o.t))/60e3));const cnt=o.lines.reduce((s,l)=>s+l.qty,0);
     return `<article class="rdcard ${isApp(o.type)?'app':''} ${m>=10?'late':''}">
       <div class="rd-no num">#${o.no}</div>
-      <div class="rd-type">${esc(typeName(o))}</div>
+      <div class="rd-type">${esc(typeName(o))}</div>${o.by?`<div class="rd-meta"><span>👤 ${esc(o.by)}</span></div>`:''}
       <div class="rd-meta"><span><span class="num">${cnt}</span> ${L('قطعة','pcs')}</span><span>${L('جاهز من','Ready for')} <span class="num">${m}</span> ${L('د','min')}</span></div>
       <ul class="rd-items">${o.lines.map(l=>`<li><span class="num">${l.qty}×</span> ${esc(nm(l))}</li>`).join('')}</ul>
       <div class="rd-acts">${waNum(o.phone||'')?`<a class="btn sm wa-btn" target="_blank" rel="noopener" href="${waLink(waNum(o.phone),readyText(o))}">${L('بلّغ العميل','Notify customer')}</a>`:''}<button class="btn" data-hand="${o.id}">${L('تم التسليم','Handed over')}</button></div>
@@ -1219,7 +1277,7 @@ function drawInv(){
   el.innerHTML=list.length?`<ul class="invl">${list.slice(0,ishow).map(o=>{const d=new Date(o.t);const cnt=o.lines.reduce((s,l)=>s+l.qty,0);
     return `<li><button data-inv="${o.id}">
       <b class="num">#${o.no}</b>
-      <span class="iv-main"><span>${esc(typeName(o))}</span><small><span class="num">${cnt}</span> ${L('أصناف','items')} · <span class="num">${d.toLocaleDateString('en-GB',{day:'2-digit',month:'2-digit'})} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span></small></span>
+      <span class="iv-main"><span>${esc(typeName(o))}${o.by?' · 👤 '+esc(o.by):''}</span><small><span class="num">${cnt}</span> ${L('أصناف','items')} · <span class="num">${d.toLocaleDateString('en-GB',{day:'2-digit',month:'2-digit'})} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span></small></span>
       ${statusChip(o)}
       <span class="iv-tot"><span class="num">${fmt(o.total)}</span> <small>${CUR()}</small></span>
     </button></li>`}).join('')}</ul>${list.length>ishow?`<div style="padding:12px;text-align:center"><button class="btn ghost sm" id="more">${L('عرض المزيد','Show more')} (<span class="num">${list.length-ishow}</span>)</button></div>`:''}`
@@ -1294,6 +1352,10 @@ function renderMenu(){
   app.innerHTML=`<h2>${L('إدارة المنيو','Menu management')}</h2><p class="sub">${EN()?`<span class="num">${allItems().length}</span> items from the Yana menu. Changes here show up in the cashier right away.`:`<span class="num">${allItems().length}</span> صنف من منيو يانا. أي تعديل هنا يظهر فوراً في الكاشير.`}</p>
   <div class="panel" style="margin-bottom:16px">
    ${FDB?`<div class="toolbar" style="margin:0 0 10px"><span style="font-size:13.5px;color:var(--muted)">${L('هذا الجهاز مسجّل دخول','This device is signed in')}</span><button class="btn ghost sm" id="fbout" type="button">${L('تسجيل خروج الجهاز','Sign this device out')}</button></div>`:''}
+   <h3 style="margin:0 0 10px;font-size:15px">${L('الويتر وأرقام الدخول','Waiters and sign-in codes')}</h3>
+   <div class="stafflist">${staff().waiters.map(w=>`<div class="srow"><input id="wn-${w.id}" data-wn="${w.id}" value="${esc(w.name)}" aria-label="${L('اسم الويتر','Waiter name')}"><input id="wp-${w.id}" data-wp="${w.id}" value="${esc(w.pin)}" inputmode="numeric" maxlength="4" class="num" aria-label="${L('رقم الدخول','Sign-in code')}"><button class="btn ghost sm" data-wdel="${w.id}" type="button">${L('حذف','Remove')}</button></div>`).join('')}</div>
+   <div class="toolbar" style="margin:8px 0 14px"><button class="btn ghost sm" id="wadd" type="button">${L('+ إضافة ويتر','+ Add waiter')}</button>
+     <label for="mgrpin" style="font-size:13.5px;color:var(--muted);margin-inline-start:auto">${L('رقم المدير','Manager code')}</label><input id="mgrpin" class="num" inputmode="numeric" maxlength="4" value="${esc(staff().managerPin)}" style="width:90px"></div>
    <div class="toolbar" style="margin:0"><label for="tcount" style="font-size:14px;font-weight:600">${L('عدد الطاولات في المحل','Number of tables')}</label><input id="tcount" type="number" min="1" max="60" value="${tableCount()}" style="width:80px"></div>
   </div>
   <div class="panel">
@@ -1315,6 +1377,17 @@ function renderMenu(){
   const keepFocus=(id,fn)=>{const pos=document.getElementById(id).selectionStart;fn();const n=document.getElementById(id);n.focus();try{n.setSelectionRange(pos,pos)}catch(e){}};
   document.getElementById('mq').oninput=e=>{mq=e.target.value;keepFocus('mq',renderMenu)};
   const fo=document.getElementById('fbout');if(fo)fo.onclick=()=>{firebase.auth().signOut();toast(L('تم تسجيل الخروج','Signed out'))};
+  const validPin=p=>/^[0-9]{4}$/.test(p);
+  app.addEventListener('change',e=>{const t=e.target;
+    if(t.dataset.wn){const w=staff().waiters.find(x=>x.id===t.dataset.wn);const v=t.value.trim();if(v){w.name=v;saveMeta();toast(L('تم حفظ الاسم','Name saved'))}else t.value=w.name}
+    if(t.dataset.wp){const w=staff().waiters.find(x=>x.id===t.dataset.wp);const v=t.value.trim();
+      if(!validPin(v)){toast(L('رقم الدخول لازم 4 أرقام','The code must be 4 digits'));t.value=w.pin;return}
+      if(v===staff().managerPin||staff().waiters.some(x=>x!==w&&x.pin===v)){toast(L('هذا الرقم مستخدم','This code is already used'));t.value=w.pin;return}
+      w.pin=v;saveMeta();toast(L('تم حفظ رقم الدخول','Code saved'))}
+    if(t.id==='mgrpin'){const v=t.value.trim();if(!validPin(v)||staff().waiters.some(x=>x.pin===v)){toast(L('رقم المدير لازم 4 أرقام وما يتكرر','Manager code must be 4 unique digits'));t.value=staff().managerPin;return}staff().managerPin=v;saveMeta();toast(L('تم حفظ رقم المدير','Manager code saved'))}
+  });
+  document.getElementById('wadd').onclick=()=>{const used=new Set(staff().waiters.map(w=>w.pin).concat(staff().managerPin));let p;do{p=String(1000+Math.floor(Math.random()*9000))}while(used.has(p));staff().waiters.push({id:'w'+Date.now(),name:L('ويتر جديد','New waiter'),pin:p});saveMeta();renderMenu()};
+  app.querySelectorAll('[data-wdel]').forEach(b=>b.onclick=()=>{if(staff().waiters.length<=1){toast(L('لازم يبقى ويتر واحد على الأقل','Keep at least one waiter'));return}staff().waiters=staff().waiters.filter(w=>w.id!==b.dataset.wdel);saveMeta();renderMenu()});
   document.getElementById('tcount').onchange=e=>{S.tables=Math.min(60,Math.max(1,parseInt(e.target.value)||30));e.target.value=S.tables;saveMeta();toast(L('تم تحديث عدد الطاولات','Table count updated'))};
   document.getElementById('mcat').onchange=e=>{mcat=e.target.value;renderMenu()};
   app.onchange=e=>{const p=e.target.dataset.p,s=e.target.dataset.s;
@@ -1391,7 +1464,7 @@ function applyLang(){
   document.getElementById('n-sales').textContent=L('سجل المبيعات','Sales log');
   document.getElementById('n-invoices').textContent=L('الفواتير','Invoices');
   document.getElementById('n-reports').textContent=L('التقارير','Reports');
-  setSync(SYNC);
+  setSync(SYNC);applyRole();
   const b=document.getElementById('langbtn');
   b.textContent=EN()?'العربية':'English';b.lang=EN()?'ar':'en';
   b.setAttribute('aria-label',EN()?'التبديل إلى العربية':'Switch to English');
@@ -1399,13 +1472,21 @@ function applyLang(){
 document.getElementById('langbtn').onclick=()=>{LANG=EN()?'ar':'en';try{localStorage.setItem('yana-lang',LANG)}catch(e){}applyLang();route(true)};
 const VIEWS={sales:renderSales,pos:renderPOS,kitchen:renderKitchen,bar:renderBar,ready:renderReady,invoices:renderInvoices,menu:renderMenu,reports:renderReports};
 function route(keepScroll){
-  const v=(location.hash||'#pos').slice(1);const view=VIEWS[v]?v:'pos';
+  let v=(location.hash||'#pos').slice(1);
+  applyRole();
+  if(isWaiterMode()){
+    document.getElementById('layer').innerHTML='';document.getElementById('app').onclick=null;document.getElementById('app').onchange=null;
+    if(!curWaiter()){renderWaiterLogin();document.querySelectorAll('#nav a').forEach(a=>a.setAttribute('aria-current','false'));return}
+    if(!WAITER_VIEWS.includes(v)){v='pos';if(location.hash!=='#pos'){history.replaceState(null,'','#pos')}}
+  }
+  const view=VIEWS[v]?v:'pos';
   document.querySelectorAll('#nav a').forEach(a=>a.setAttribute('aria-current',a.getAttribute('href')==='#'+view?'page':'false'));
   document.getElementById('layer').innerHTML='';document.getElementById('app').onclick=null;document.getElementById('app').onchange=null;
   VIEWS[view]();updateBadge();if(keepScroll!==true)window.scrollTo(0,0);
 }
 window.addEventListener('hashchange',()=>route());
 document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;const b=document.querySelector('#layer .backbtn');if(b){b.click();return}if(ticketOpen){ticketOpen=false;drawTicket()}});
+document.getElementById('userbtn').onclick=openUserMenu;
 applyLang();
 route();
 setSync('local');connectDB();
