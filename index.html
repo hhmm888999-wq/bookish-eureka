@@ -444,11 +444,9 @@ table.sheet-t{width:100%;border-collapse:collapse;font-size:14px;min-width:560px
       <a href="#invoices"><span id="n-invoices">الفواتير</span></a>
       <a href="#sales"><span id="n-sales">سجل المبيعات</span></a>
       <a href="#menu"><span id="n-menu">المنيو</span></a>
-      <a href="#staff"><span id="n-staff">الموظفين</span></a>
       <a href="#reports"><span id="n-reports">التقارير</span></a>
     </nav>
     <span class="syncdot off" id="syncdot" role="status">هذا الجهاز فقط</span>
-    <button class="langbtn" id="userbtn" type="button">👤 المدير</button>
     <button class="langbtn" id="langbtn" lang="en">English</button>
   </div>
 </header>
@@ -729,7 +727,8 @@ function managerBy(p){if(p===staff().managerPin)return L('المدير','Manager
 const allPins=()=>[staff().managerPin].concat(staff().waiters.map(w=>w.pin),staff().supervisors.map(s=>s.pin));
 let MODE='manager',WAITER=null;
 try{MODE=localStorage.getItem('yana-mode')||'manager';WAITER=localStorage.getItem('yana-waiter')||null}catch(e){}
-const isWaiterMode=()=>MODE==='waiter';
+MODE='manager';WAITER=null;try{localStorage.removeItem('yana-mode');localStorage.removeItem('yana-waiter')}catch(e){}
+const isWaiterMode=()=>false; // staff roles removed
 function fixManagerPin(){if(!S.staff)return;let ch=false;if(S.staff.managerPin==='0000'){S.staff.managerPin='8020';ch=true}if(!S.staff.supervisors){S.staff.supervisors=clone(DEFAULT_SUPS);ch=true}if(ch)saveMeta()}
 const curWaiter=()=>isWaiterMode()&&WAITER?staff().waiters.find(w=>w.id===WAITER)||null:null;
 const WAITER_VIEWS=['pos','ready'];
@@ -860,12 +859,12 @@ function renderDayStart(){
     ${isWaiterMode()?`<p class="hint">${L('اطلب من المدير يبدأ اليوم.','Ask the manager to start the day.')}</p>`:`<button class="btn crust big" id="startday">${L('بدء اليوم','Start the day')}</button>`}
   </div>`;
   if(isWaiterMode())return;
-  document.getElementById('startday').onclick=()=>askManagerPin(L('بدء اليوم','Start the day'),who=>{S.day={open:true,startAt:Date.now(),openedBy:who};saveMeta();toast(L('بدأ اليوم الساعة ','Day started at ')+hm(S.day.startAt));route()});
+  document.getElementById('startday').onclick=()=>(who=>{S.day={open:true,startAt:Date.now()};saveMeta();toast(L('بدأ اليوم الساعة ','Day started at ')+hm(S.day.startAt));route()})();
 }
 
 // ---------- POS ----------
 let cat='all',q='',cart=[],otype='',table='',appNo='',ticketOpen=false,choosing=false,pending='';
-function daySumHTML(){const ds=daySummary(S.day.startAt,Date.now()+1);return `${L('اليوم مفتوح من','Day open since')} <b class="num">${hm(S.day.startAt)}</b>${S.day.openedBy?` (${esc(S.day.openedBy)})`:''} · <span class="num">${ds.count}</span> ${L('طلب','orders')} · <span class="num">${fmt0(ds.total)}</span> ${CUR()}`}
+function daySumHTML(){const ds=daySummary(S.day.startAt,Date.now()+1);return `${L('اليوم مفتوح من','Day open since')} <b class="num">${hm(S.day.startAt)}</b> · <span class="num">${ds.count}</span> ${L('طلب','orders')} · <span class="num">${fmt0(ds.total)}</span> ${CUR()}`}
 function renderPOS(){
   const app=document.getElementById('app');
   if(!dayOpen()){renderDayStart();return}
@@ -885,7 +884,7 @@ function renderPOS(){
   </div>
   <button class="btn cartbar" id="cartbar"></button>`;
   document.getElementById('q').addEventListener('input',e=>{q=e.target.value;drawGrid()});
-  const cdb=document.getElementById('closeday');if(cdb)cdb.onclick=()=>askManagerPin(L('إغلاق اليوم','Close the day'),who=>{closingBy=who;openCloseDay()});
+  const cdb=document.getElementById('closeday');if(cdb)cdb.onclick=openCloseDay;
   document.getElementById('cartbar').onclick=()=>{ticketOpen=true;drawTicket()};
   drawCats();drawGrid();drawTicket();drawStart();
 }
@@ -1169,7 +1168,7 @@ function showReceipt(o,fromList){
 // ---------- Kitchen ----------
 let kst='all',ktimer=null;
 const KITCHEN_PIN='8020';
-let kitchenOK=false;try{kitchenOK=sessionStorage.getItem('yana-k')==='1'}catch(e){}
+let kitchenOK=true; // kitchen code removed
 function renderKitchenLogin(){
   const app=document.getElementById('app');let pin='';
   const draw=(err)=>{
@@ -1196,7 +1195,7 @@ function renderKitchen(){
 }
 function renderStation(){
   const app=document.getElementById('app');const isBar=kst==='b';
-  app.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h2>${isBar?L('شاشة البار','Bar screen'):L('شاشة المطبخ','Kitchen screen')}</h2>${isBar?'':`<button class="btn ghost sm" id="klogout">${L('تسجيل خروج','Sign out')}</button>`}</div><p class="sub">${isBar?L('طلبات المشروبات توصل هنا فور إرسال الطلب، ومعها مشروبات الفطور الفرنسي. الأخضر أقل من 8 دقائق، والبرتقالي حتى 15، والأحمر متأخر.','Drink orders arrive here as soon as an order is sent, including French breakfast drinks. Green is under 8 minutes, orange up to 15, red is late.'):L('طلبات الأكل توصل هنا فور إرسال الطلب. الأخضر أقل من 8 دقائق، والبرتقالي حتى 15، والأحمر متأخر.','Food orders arrive here as soon as an order is sent. Green is under 8 minutes, orange up to 15, red is late.')}</p>
+  app.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h2>${isBar?L('شاشة البار','Bar screen'):L('شاشة المطبخ','Kitchen screen')}</h2></div><p class="sub">${isBar?L('طلبات المشروبات توصل هنا فور إرسال الطلب، ومعها مشروبات الفطور الفرنسي. الأخضر أقل من 8 دقائق، والبرتقالي حتى 15، والأحمر متأخر.','Drink orders arrive here as soon as an order is sent, including French breakfast drinks. Green is under 8 minutes, orange up to 15, red is late.'):L('طلبات الأكل توصل هنا فور إرسال الطلب. الأخضر أقل من 8 دقائق، والبرتقالي حتى 15، والأحمر متأخر.','Food orders arrive here as soon as an order is sent. Green is under 8 minutes, orange up to 15, red is late.')}</p>
    <div class="kcols"><div class="kgrid" id="kgrid"></div><div class="ready" id="ready"></div></div>`;
   const lo=document.getElementById('klogout');if(lo)lo.onclick=()=>{kitchenOK=false;try{sessionStorage.removeItem('yana-k')}catch(e){}renderKitchen()};
   drawK();clearInterval(ktimer);ktimer=setInterval(()=>{if(location.hash==='#kitchen'||location.hash==='#bar')drawK()},15000);
@@ -1499,7 +1498,6 @@ function applyLang(){
   document.getElementById('n-bar').textContent=L('البار','Bar');
   document.getElementById('n-ready').textContent=L('الطلبات الجاهزة','Ready orders');
   document.getElementById('n-sales').textContent=L('سجل المبيعات','Sales log');
-  document.getElementById('n-staff').textContent=L('الموظفين','Staff');
   document.getElementById('n-invoices').textContent=L('الفواتير','Invoices');
   document.getElementById('n-reports').textContent=L('التقارير','Reports');
   setSync(SYNC);applyRole();
@@ -1508,7 +1506,7 @@ function applyLang(){
   b.setAttribute('aria-label',EN()?'التبديل إلى العربية':'Switch to English');
 }
 document.getElementById('langbtn').onclick=()=>{LANG=EN()?'ar':'en';try{localStorage.setItem('yana-lang',LANG)}catch(e){}applyLang();route(true)};
-const VIEWS={staff:renderStaff,sales:renderSales,pos:renderPOS,kitchen:renderKitchen,bar:renderBar,ready:renderReady,invoices:renderInvoices,menu:renderMenu,reports:renderReports};
+const VIEWS={sales:renderSales,pos:renderPOS,kitchen:renderKitchen,bar:renderBar,ready:renderReady,invoices:renderInvoices,menu:renderMenu,reports:renderReports};
 function route(keepScroll){
   let v=(location.hash||'#pos').slice(1);
   applyRole();
@@ -1525,7 +1523,6 @@ function route(keepScroll){
 window.addEventListener('hashchange',()=>route());
 document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;const b=document.querySelector('#layer .backbtn');if(b){b.click();return}if(ticketOpen){ticketOpen=false;drawTicket()}});
 fixManagerPin();
-document.getElementById('userbtn').onclick=openUserMenu;
 applyLang();
 route();
 setSync('local');connectDB();
