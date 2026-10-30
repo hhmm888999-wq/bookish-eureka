@@ -253,6 +253,14 @@ a.btn[aria-disabled="true"]{opacity:.4;pointer-events:none}
 .wa-btn[aria-disabled="true"]{opacity:.4;pointer-events:none}
 .tiny-note{font-size:12px}
 .ra{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+@media print{
+  @page{size:80mm auto;margin:2mm}
+  body.printing-rcpt{background:#fff!important}
+  body.printing-rcpt *{visibility:hidden!important}
+  body.printing-rcpt #rcpt,body.printing-rcpt #rcpt *{visibility:visible!important}
+  body.printing-rcpt #rcpt{position:fixed;left:0;top:0;width:76mm;max-width:none;margin:0;padding:0;border:0;border-radius:0;font-size:12px;color:#000}
+  body.printing-rcpt .scrim{background:none!important;position:static!important}
+}
 .receipt{background:#fff;color:#111;font-size:13px;border-radius:6px;padding:18px 16px;border:1px solid #ddd;max-width:320px;margin:0 auto}
 .receipt .c{text-align:center}
 .receipt h5{font-family:var(--f-display);font-size:22px;margin:0;color:#243c29}
@@ -1138,7 +1146,8 @@ function showReceipt(o,fromList){
       <div class="qr" id="qr"></div>
       <p class="c tiny" style="margin:8px 0 0">${L('رمز QR بصيغة المرحلة الأولى. الربط مع منصة فاتورة غير مفعّل في التجربة.','QR code in Phase 1 format. Fatoora integration is not active in this trial.')}</p>
     </div>
-    <button class="btn crust" id="pdfbtn" style="margin-top:14px;width:100%">${pdfLabel()}</button>
+    ${window.YANA_FB?`<button class="btn" id="printbtn" style="margin-top:14px;width:100%">🖨️ ${L('طباعة الفاتورة','Print invoice')}</button>`:''}
+    <button class="btn crust" id="pdfbtn" style="margin-top:${window.YANA_FB?8:14}px;width:100%">${pdfLabel()}</button>
     <p class="note" id="pdfnote" style="margin-top:6px">${L('في الجوال تنفتح قائمة المشاركة وتختار التطبيق والمحادثة. في الكمبيوتر تنحفظ الفاتورة كملف.','On a phone the share menu opens so you can pick an app and chat. On a computer the invoice is saved as a file.')}</p>
     ${waReady()?`<a class="btn ghost" style="margin-top:8px;width:100%;text-decoration:none;display:flex;justify-content:center;gap:6px" target="_blank" rel="noopener" href="${waLink(waTarget(),orderText(o))}">${L('إعادة إرسال الطلب إلى','Resend order to')} <span class="num">${esc(waDest())}</span></a>`:''}
     <div class="wa">
@@ -1151,6 +1160,7 @@ function showReceipt(o,fromList){
   const ph=document.getElementById('waphone'),wl=document.getElementById('walink');
   const syncWa=(user)=>{const n=waNum(ph.value);const p=ph.value.trim();if(user&&p!==(o.phone||'')){o.phone=p;writeOrder(o,{phone:p})}if(n){wl.href=waLink(n,receiptText(o));wl.removeAttribute('aria-disabled')}else{wl.removeAttribute('href');wl.setAttribute('aria-disabled','true')}};
   ph.oninput=()=>syncWa(true);syncWa(false);
+  const pb=document.getElementById('printbtn');if(pb)pb.onclick=()=>{document.body.classList.add('printing-rcpt');setTimeout(()=>{window.print();setTimeout(()=>document.body.classList.remove('printing-rcpt'),500)},50)};
   document.getElementById('pdfbtn').onclick=async e=>{
     const b=e.currentTarget,note=document.getElementById('pdfnote');b.disabled=true;b.textContent=L('جاري تجهيز الملف…','Preparing the file…');
     try{
