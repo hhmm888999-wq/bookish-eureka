@@ -444,6 +444,7 @@ table.sheet-t{width:100%;border-collapse:collapse;font-size:14px;min-width:560px
       <a href="#invoices"><span id="n-invoices">الفواتير</span></a>
       <a href="#sales"><span id="n-sales">سجل المبيعات</span></a>
       <a href="#menu"><span id="n-menu">المنيو</span></a>
+      <a href="#staff"><span id="n-staff">الموظفين</span></a>
       <a href="#reports"><span id="n-reports">التقارير</span></a>
     </nav>
     <span class="syncdot off" id="syncdot" role="status">هذا الجهاز فقط</span>
@@ -1356,6 +1357,43 @@ function renderSales(){
   app.onkeydown=e=>{const r=e.target.closest('[data-sd]');if(r&&e.key==='Enter')openDay(r.dataset.sd)};
 }
 
+
+// ---------- Staff (manager / supervisors only) ----------
+let staffOK=false;
+function renderStaff(){
+  const app=document.getElementById('app');
+  if(!staffOK){app.innerHTML=`<div class="daystart"><h2>${L('الموظفين','Staff')}</h2><p class="sub">${L('هذي الصفحة فيها أرقام دخول الموظفين، وتنفتح للمدير والمشرفين بس.','This page holds staff sign-in codes and opens for the manager and supervisors only.')}</p><button class="btn crust big" id="stfopen">${L('دخول','Open')}</button></div>`;
+    document.getElementById('stfopen').onclick=()=>askManagerPin(L('الموظفين','Staff'),()=>{staffOK=true;renderStaff()});return}
+  app.innerHTML=`<h2>${L('الموظفين','Staff')}</h2><p class="sub">${L('المشرفين والويتر وأرقام دخولهم. كل رقم 4 أرقام وما يتكرر.','Supervisors, waiters and their sign-in codes. Each code is 4 unique digits.')}</p>
+  <div class="panel">
+   <h3 style="margin:0 0 6px;font-size:15px">${L('المشرفين','Supervisors')}</h3>
+   <p class="sub" style="margin:0 0 8px;font-size:13px">${L('لهم كل صلاحيات المدير: بدء اليوم وإغلاقه، ودخول المطبخ، وإلغاء وضع الويتر.','Full manager rights: open and close the day, kitchen access, and turning off waiter mode.')}</p>
+   <div class="stafflist">${staff().supervisors.map(w=>`<div class="srow"><input id="sn-${w.id}" data-sn="${w.id}" value="${esc(w.name)}" aria-label="${L('اسم المشرف','Supervisor name')}"><input id="sp-${w.id}" data-sp="${w.id}" value="${esc(w.pin)}" inputmode="numeric" maxlength="4" class="num" aria-label="${L('رقم الدخول','Sign-in code')}"><button class="btn ghost sm" data-sdel="${w.id}" type="button">${L('حذف','Remove')}</button></div>`).join('')}</div>
+   <div class="toolbar" style="margin:8px 0 16px"><button class="btn ghost sm" id="sadd" type="button">${L('+ إضافة مشرف','+ Add supervisor')}</button></div>
+   <h3 style="margin:0 0 10px;font-size:15px">${L('الويتر وأرقام الدخول','Waiters and sign-in codes')}</h3>
+   <div class="stafflist">${staff().waiters.map(w=>`<div class="srow"><input id="wn-${w.id}" data-wn="${w.id}" value="${esc(w.name)}" aria-label="${L('اسم الويتر','Waiter name')}"><input id="wp-${w.id}" data-wp="${w.id}" value="${esc(w.pin)}" inputmode="numeric" maxlength="4" class="num" aria-label="${L('رقم الدخول','Sign-in code')}"><button class="btn ghost sm" data-wdel="${w.id}" type="button">${L('حذف','Remove')}</button></div>`).join('')}</div>
+   <div class="toolbar" style="margin:8px 0 14px"><button class="btn ghost sm" id="wadd" type="button">${L('+ إضافة ويتر','+ Add waiter')}</button>
+     <label for="mgrpin" style="font-size:13.5px;color:var(--muted);margin-inline-start:auto">${L('رقم المدير','Manager code')}</label><input id="mgrpin" class="num" inputmode="numeric" maxlength="4" value="${esc(staff().managerPin)}" style="width:90px"></div>
+  </div>`;
+  const validPin=p=>/^[0-9]{4}$/.test(p);
+  app.onchange=e=>{const t=e.target;
+    if(t.dataset.wn){const w=staff().waiters.find(x=>x.id===t.dataset.wn);const v=t.value.trim();if(v){w.name=v;saveMeta();toast(L('تم حفظ الاسم','Name saved'))}else t.value=w.name}
+    if(t.dataset.sn){const w=staff().supervisors.find(x=>x.id===t.dataset.sn);const v=t.value.trim();if(v){w.name=v;saveMeta();toast(L('تم حفظ الاسم','Name saved'))}else t.value=w.name}
+    const pinEdit=(w)=>{const v=t.value.trim();
+      if(!validPin(v)){toast(L('رقم الدخول لازم 4 أرقام','The code must be 4 digits'));t.value=w.pin;return}
+      if(v!==w.pin&&allPins().includes(v)){toast(L('هذا الرقم مستخدم','This code is already used'));t.value=w.pin;return}
+      w.pin=v;saveMeta();toast(L('تم حفظ رقم الدخول','Code saved'))};
+    if(t.dataset.wp)pinEdit(staff().waiters.find(x=>x.id===t.dataset.wp));
+    if(t.dataset.sp)pinEdit(staff().supervisors.find(x=>x.id===t.dataset.sp));
+    if(t.id==='mgrpin'){const v=t.value.trim();if(!validPin(v)||(v!==staff().managerPin&&allPins().includes(v))){toast(L('رقم المدير لازم 4 أرقام وما يتكرر','Manager code must be 4 unique digits'));t.value=staff().managerPin;return}staff().managerPin=v;saveMeta();toast(L('تم حفظ رقم المدير','Manager code saved'))}
+  };
+  const freePin=()=>{const used=new Set(allPins());let p;do{p=String(1000+Math.floor(Math.random()*9000))}while(used.has(p));return p};
+  document.getElementById('sadd').onclick=()=>{staff().supervisors.push({id:'s'+Date.now(),name:L('مشرف جديد','New supervisor'),pin:freePin()});saveMeta();renderStaff()};
+  app.querySelectorAll('[data-sdel]').forEach(b=>b.onclick=()=>{staff().supervisors=staff().supervisors.filter(w=>w.id!==b.dataset.sdel);saveMeta();renderStaff()});
+  document.getElementById('wadd').onclick=()=>{const used=new Set(allPins());let p;do{p=String(1000+Math.floor(Math.random()*9000))}while(used.has(p));staff().waiters.push({id:'w'+Date.now(),name:L('ويتر جديد','New waiter'),pin:p});saveMeta();renderStaff()};
+  app.querySelectorAll('[data-wdel]').forEach(b=>b.onclick=()=>{if(staff().waiters.length<=1){toast(L('لازم يبقى ويتر واحد على الأقل','Keep at least one waiter'));return}staff().waiters=staff().waiters.filter(w=>w.id!==b.dataset.wdel);saveMeta();renderStaff()});
+}
+
 // ---------- Menu management ----------
 let mq='',mcat='all';
 function renderMenu(){
@@ -1366,14 +1404,6 @@ function renderMenu(){
   app.innerHTML=`<h2>${L('إدارة المنيو','Menu management')}</h2><p class="sub">${EN()?`<span class="num">${allItems().length}</span> items from the Yana menu. Changes here show up in the cashier right away.`:`<span class="num">${allItems().length}</span> صنف من منيو يانا. أي تعديل هنا يظهر فوراً في الكاشير.`}</p>
   <div class="panel" style="margin-bottom:16px">
    ${FDB?`<div class="toolbar" style="margin:0 0 10px"><span style="font-size:13.5px;color:var(--muted)">${L('هذا الجهاز مسجّل دخول','This device is signed in')}</span><button class="btn ghost sm" id="fbout" type="button">${L('تسجيل خروج الجهاز','Sign this device out')}</button></div>`:''}
-   <h3 style="margin:0 0 6px;font-size:15px">${L('المشرفين','Supervisors')}</h3>
-   <p class="sub" style="margin:0 0 8px;font-size:13px">${L('لهم كل صلاحيات المدير: بدء اليوم وإغلاقه، ودخول المطبخ، وإلغاء وضع الويتر.','Full manager rights: open and close the day, kitchen access, and turning off waiter mode.')}</p>
-   <div class="stafflist">${staff().supervisors.map(w=>`<div class="srow"><input id="sn-${w.id}" data-sn="${w.id}" value="${esc(w.name)}" aria-label="${L('اسم المشرف','Supervisor name')}"><input id="sp-${w.id}" data-sp="${w.id}" value="${esc(w.pin)}" inputmode="numeric" maxlength="4" class="num" aria-label="${L('رقم الدخول','Sign-in code')}"><button class="btn ghost sm" data-sdel="${w.id}" type="button">${L('حذف','Remove')}</button></div>`).join('')}</div>
-   <div class="toolbar" style="margin:8px 0 16px"><button class="btn ghost sm" id="sadd" type="button">${L('+ إضافة مشرف','+ Add supervisor')}</button></div>
-   <h3 style="margin:0 0 10px;font-size:15px">${L('الويتر وأرقام الدخول','Waiters and sign-in codes')}</h3>
-   <div class="stafflist">${staff().waiters.map(w=>`<div class="srow"><input id="wn-${w.id}" data-wn="${w.id}" value="${esc(w.name)}" aria-label="${L('اسم الويتر','Waiter name')}"><input id="wp-${w.id}" data-wp="${w.id}" value="${esc(w.pin)}" inputmode="numeric" maxlength="4" class="num" aria-label="${L('رقم الدخول','Sign-in code')}"><button class="btn ghost sm" data-wdel="${w.id}" type="button">${L('حذف','Remove')}</button></div>`).join('')}</div>
-   <div class="toolbar" style="margin:8px 0 14px"><button class="btn ghost sm" id="wadd" type="button">${L('+ إضافة ويتر','+ Add waiter')}</button>
-     <label for="mgrpin" style="font-size:13.5px;color:var(--muted);margin-inline-start:auto">${L('رقم المدير','Manager code')}</label><input id="mgrpin" class="num" inputmode="numeric" maxlength="4" value="${esc(staff().managerPin)}" style="width:90px"></div>
    <div class="toolbar" style="margin:0"><label for="tcount" style="font-size:14px;font-weight:600">${L('عدد الطاولات في المحل','Number of tables')}</label><input id="tcount" type="number" min="1" max="60" value="${tableCount()}" style="width:80px"></div>
   </div>
   <div class="panel">
@@ -1395,23 +1425,6 @@ function renderMenu(){
   const keepFocus=(id,fn)=>{const pos=document.getElementById(id).selectionStart;fn();const n=document.getElementById(id);n.focus();try{n.setSelectionRange(pos,pos)}catch(e){}};
   document.getElementById('mq').oninput=e=>{mq=e.target.value;keepFocus('mq',renderMenu)};
   const fo=document.getElementById('fbout');if(fo)fo.onclick=()=>{firebase.auth().signOut();toast(L('تم تسجيل الخروج','Signed out'))};
-  const validPin=p=>/^[0-9]{4}$/.test(p);
-  app.addEventListener('change',e=>{const t=e.target;
-    if(t.dataset.wn){const w=staff().waiters.find(x=>x.id===t.dataset.wn);const v=t.value.trim();if(v){w.name=v;saveMeta();toast(L('تم حفظ الاسم','Name saved'))}else t.value=w.name}
-    if(t.dataset.sn){const w=staff().supervisors.find(x=>x.id===t.dataset.sn);const v=t.value.trim();if(v){w.name=v;saveMeta();toast(L('تم حفظ الاسم','Name saved'))}else t.value=w.name}
-    const pinEdit=(w)=>{const v=t.value.trim();
-      if(!validPin(v)){toast(L('رقم الدخول لازم 4 أرقام','The code must be 4 digits'));t.value=w.pin;return}
-      if(v!==w.pin&&allPins().includes(v)){toast(L('هذا الرقم مستخدم','This code is already used'));t.value=w.pin;return}
-      w.pin=v;saveMeta();toast(L('تم حفظ رقم الدخول','Code saved'))};
-    if(t.dataset.wp)pinEdit(staff().waiters.find(x=>x.id===t.dataset.wp));
-    if(t.dataset.sp)pinEdit(staff().supervisors.find(x=>x.id===t.dataset.sp));
-    if(t.id==='mgrpin'){const v=t.value.trim();if(!validPin(v)||(v!==staff().managerPin&&allPins().includes(v))){toast(L('رقم المدير لازم 4 أرقام وما يتكرر','Manager code must be 4 unique digits'));t.value=staff().managerPin;return}staff().managerPin=v;saveMeta();toast(L('تم حفظ رقم المدير','Manager code saved'))}
-  });
-  const freePin=()=>{const used=new Set(allPins());let p;do{p=String(1000+Math.floor(Math.random()*9000))}while(used.has(p));return p};
-  document.getElementById('sadd').onclick=()=>{staff().supervisors.push({id:'s'+Date.now(),name:L('مشرف جديد','New supervisor'),pin:freePin()});saveMeta();renderMenu()};
-  app.querySelectorAll('[data-sdel]').forEach(b=>b.onclick=()=>{staff().supervisors=staff().supervisors.filter(w=>w.id!==b.dataset.sdel);saveMeta();renderMenu()});
-  document.getElementById('wadd').onclick=()=>{const used=new Set(allPins());let p;do{p=String(1000+Math.floor(Math.random()*9000))}while(used.has(p));staff().waiters.push({id:'w'+Date.now(),name:L('ويتر جديد','New waiter'),pin:p});saveMeta();renderMenu()};
-  app.querySelectorAll('[data-wdel]').forEach(b=>b.onclick=()=>{if(staff().waiters.length<=1){toast(L('لازم يبقى ويتر واحد على الأقل','Keep at least one waiter'));return}staff().waiters=staff().waiters.filter(w=>w.id!==b.dataset.wdel);saveMeta();renderMenu()});
   document.getElementById('tcount').onchange=e=>{S.tables=Math.min(60,Math.max(1,parseInt(e.target.value)||30));e.target.value=S.tables;saveMeta();toast(L('تم تحديث عدد الطاولات','Table count updated'))};
   document.getElementById('mcat').onchange=e=>{mcat=e.target.value;renderMenu()};
   app.onchange=e=>{const p=e.target.dataset.p,s=e.target.dataset.s;
@@ -1486,6 +1499,7 @@ function applyLang(){
   document.getElementById('n-bar').textContent=L('البار','Bar');
   document.getElementById('n-ready').textContent=L('الطلبات الجاهزة','Ready orders');
   document.getElementById('n-sales').textContent=L('سجل المبيعات','Sales log');
+  document.getElementById('n-staff').textContent=L('الموظفين','Staff');
   document.getElementById('n-invoices').textContent=L('الفواتير','Invoices');
   document.getElementById('n-reports').textContent=L('التقارير','Reports');
   setSync(SYNC);applyRole();
@@ -1494,7 +1508,7 @@ function applyLang(){
   b.setAttribute('aria-label',EN()?'التبديل إلى العربية':'Switch to English');
 }
 document.getElementById('langbtn').onclick=()=>{LANG=EN()?'ar':'en';try{localStorage.setItem('yana-lang',LANG)}catch(e){}applyLang();route(true)};
-const VIEWS={sales:renderSales,pos:renderPOS,kitchen:renderKitchen,bar:renderBar,ready:renderReady,invoices:renderInvoices,menu:renderMenu,reports:renderReports};
+const VIEWS={staff:renderStaff,sales:renderSales,pos:renderPOS,kitchen:renderKitchen,bar:renderBar,ready:renderReady,invoices:renderInvoices,menu:renderMenu,reports:renderReports};
 function route(keepScroll){
   let v=(location.hash||'#pos').slice(1);
   applyRole();
