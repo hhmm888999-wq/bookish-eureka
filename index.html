@@ -593,6 +593,7 @@ function refreshView(kind){
   if(v==='invoices'){if(!modal)drawInv();return}
   if(v==='pos'||v===''){const d=dayOpen();if(lastDayOpen!==null&&d!==lastDayOpen&&!modal)route(true);lastDayOpen=d;
     if(kind==='meta'&&!modal&&!typing&&document.getElementById('grid')){drawGrid()}
+    const dsEl=document.getElementById('daysum');if(dsEl&&dayOpen())dsEl.innerHTML=daySumHTML();
     const tk=document.getElementById('ticket');if(tk&&kind==='counter'&&!typing)drawTicket();return}
   if((v==='reports'||v==='sales'||v==='menu')&&!modal&&!typing)route(true);
 }
@@ -792,11 +793,12 @@ function renderDayStart(){
 
 // ---------- POS ----------
 let cat='all',q='',cart=[],otype='',table='',appNo='',ticketOpen=false,choosing=false,pending='';
+function daySumHTML(){const ds=daySummary(S.day.startAt,Date.now()+1);return `${L('اليوم مفتوح من','Day open since')} <b class="num">${hm(S.day.startAt)}</b> · <span class="num">${ds.count}</span> ${L('طلب','orders')} · <span class="num">${fmt0(ds.total)}</span> ${CUR()}`}
 function renderPOS(){
   const app=document.getElementById('app');
   if(!dayOpen()){renderDayStart();return}
   const ds=daySummary(S.day.startAt,Date.now());
-  app.innerHTML=`<div class="daybar"><span>${L('اليوم مفتوح من','Day open since')} <b class="num">${hm(S.day.startAt)}</b> · <span class="num">${ds.count}</span> ${L('طلب','orders')} · <span class="num">${fmt0(ds.total)}</span> ${CUR()}</span><button class="btn ghost sm" id="closeday">${L('إغلاق اليوم','Close the day')}</button></div>
+  app.innerHTML=`<div class="daybar"><span id="daysum">${daySumHTML()}</span><button class="btn ghost sm" id="closeday">${L('إغلاق اليوم','Close the day')}</button></div>
   <div class="pos">
    <section style="min-width:0">
     <div id="startp"></div>
