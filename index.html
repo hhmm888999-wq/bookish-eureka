@@ -721,11 +721,15 @@ async function saveFile(filename,data){
 }
 
 // ---------- staff (waiters) ----------
-const staff=()=>{if(!S.staff)S.staff={managerPin:'8020',waiters:[{id:'w1',name:'شهريار',pin:'1122'}]};return S.staff};
+const DEFAULT_SUPS=[{id:'s1',name:'روني',pin:'9655'},{id:'s2',name:'رزانا',pin:'6873'}];
+const staff=()=>{if(!S.staff)S.staff={managerPin:'8020',waiters:[{id:'w1',name:'شهريار',pin:'1122'}]};if(!S.staff.supervisors)S.staff.supervisors=clone(DEFAULT_SUPS);return S.staff};
+// manager code or a supervisor code -> who it is (null if neither)
+function managerBy(p){if(p===staff().managerPin)return L('المدير','Manager');const s=staff().supervisors.find(x=>x.pin===p);return s?s.name:null}
+const allPins=()=>[staff().managerPin].concat(staff().waiters.map(w=>w.pin),staff().supervisors.map(s=>s.pin));
 let MODE='manager',WAITER=null;
 try{MODE=localStorage.getItem('yana-mode')||'manager';WAITER=localStorage.getItem('yana-waiter')||null}catch(e){}
 const isWaiterMode=()=>MODE==='waiter';
-function fixManagerPin(){if(S.staff&&S.staff.managerPin==='0000'){S.staff.managerPin='8020';saveMeta()}}
+function fixManagerPin(){if(!S.staff)return;let ch=false;if(S.staff.managerPin==='0000'){S.staff.managerPin='8020';ch=true}if(!S.staff.supervisors){S.staff.supervisors=clone(DEFAULT_SUPS);ch=true}if(ch)saveMeta()}
 const curWaiter=()=>isWaiterMode()&&WAITER?staff().waiters.find(w=>w.id===WAITER)||null:null;
 const WAITER_VIEWS=['pos','ready'];
 function setMode(m,w){MODE=m;WAITER=w||null;try{localStorage.setItem('yana-mode',m);if(w)localStorage.setItem('yana-waiter',w);else localStorage.removeItem('yana-waiter')}catch(e){}applyRole();route()}
@@ -754,14 +758,14 @@ function askManagerPin(title,onOk){
   const Ly=document.getElementById('layer');
   Ly.innerHTML=`<div class="scrim" id="scrim"><div class="sheet" role="dialog" aria-modal="true"><div class="sheet-top">${backBtn('mpback')}</div><div id="mpbox"></div></div></div>`;
   const box=document.getElementById('mpbox');
-  pinPad(box,{title,sub:L('هذي الخاصية للمدير فقط. اكتب رقم المدير.','Manager only. Enter the manager code.'),onPin:p=>{if(p===staff().managerPin){Ly.innerHTML='';onOk();return true}return false}});
+  pinPad(box,{title,sub:L('للمدير والمشرفين فقط. اكتب رقمك.','Manager and supervisors only. Enter your code.'),onPin:p=>{const who=managerBy(p);if(who){Ly.innerHTML='';onOk(who);return true}return false}});
   box.querySelector('.pinbox').style.margin='0 auto';box.querySelector('.pinbox').style.border='0';
   Ly.onclick=e=>{if(e.target.id==='scrim'||e.target.closest('#mpback'))Ly.innerHTML=''};
 }
 function renderWaiterLogin(){
   const app=document.getElementById('app');let managerStep=false;
   const show=()=>{
-    pinPad(app,managerStep?{title:L('دخول المدير','Manager sign-in'),sub:L('اكتب رقم المدير لإلغاء وضع الويتر في هذا الجهاز','Enter the manager code to turn off waiter mode on this device'),onPin:p=>{if(p===staff().managerPin){setMode('manager');toast(L('رجع الجهاز لوضع المدير','Device back in manager mode'));return true}return false},extra:`<button class="btn ghost sm" id="wlback" style="margin-top:14px">${L('رجوع لدخول الويتر','Back to waiter sign-in')}</button>`,onClick:e=>{if(e.target.closest('#wlback')){managerStep=false;show();return true}}}
+    pinPad(app,managerStep?{title:L('دخول المدير','Manager sign-in'),sub:L('اكتب رقم المدير أو المشرف لإلغاء وضع الويتر في هذا الجهاز','Enter a manager or supervisor code to turn off waiter mode on this device'),onPin:p=>{if(managerBy(p)){setMode('manager');toast(L('رجع الجهاز لوضع المدير','Device back in manager mode'));return true}return false},extra:`<button class="btn ghost sm" id="wlback" style="margin-top:14px">${L('رجوع لدخول الويتر','Back to waiter sign-in')}</button>`,onClick:e=>{if(e.target.closest('#wlback')){managerStep=false;show();return true}}}
       :{title:L('دخول الويتر','Waiter sign-in'),sub:L('اكتب رقم الدخول الخاص فيك','Enter your sign-in code'),onPin:p=>{const w=staff().waiters.find(x=>x.pin===p);if(w){setMode('waiter',w.id);toast(L('أهلاً ','Welcome ')+w.name);return true}return false},extra:`<button class="btn ghost sm" id="wlmgr" style="margin-top:14px">${L('دخول المدير','Manager sign-in')}</button>`,onClick:e=>{if(e.target.closest('#wlmgr')){managerStep=true;show();return true}}});
   };
   show();
@@ -823,6 +827,7 @@ function wireReport(s){
       toast(L('تم حفظ التقرير','Report saved'))}catch(err){note.textContent=err&&err.code==='declined'?L('تم إلغاء الحفظ.','Save cancelled.'):L('ما قدرنا نحفظ الملف، حاول مرة ثانية.','Could not save the file. Try again.')}};
   const a=document.getElementById('rpcsv'),b=document.getElementById('rppdf');if(a)a.onclick=()=>save_('csv');if(b)b.onclick=()=>save_('pdf');
 }
+let closingBy='';
 function openCloseDay(){
   const s=daySummary(S.day.startAt,Date.now());
   const Ly=document.getElementById('layer');
@@ -837,7 +842,7 @@ function openCloseDay(){
     if(e.target.id==='scrim'||e.target.closest('#cdback,#cdno')){Ly.innerHTML='';return}
     if(e.target.closest('#cdyes')){
       const fin=daySummary(S.day.startAt,Date.now());
-      S.days=S.days||[];S.days.unshift({startAt:fin.from,endAt:fin.to,count:fin.count,total:fin.total});
+      S.days=S.days||[];S.days.unshift({startAt:fin.from,endAt:fin.to,count:fin.count,total:fin.total,openedBy:S.day.openedBy||'',closedBy:closingBy||''});
       S.day={open:false,lastEnd:fin.to};saveMeta();
       cart=[];otype='';table='';appNo='';
       Ly.innerHTML=`<div class="scrim"><div class="sheet wide" role="dialog" aria-modal="true"><div id="dsumbox" class="printbox"><h3>${L('تقرير إغلاق اليوم','Day close report')} · ${L(SELLER.shopAr,SELLER.shopEn)}</h3>${summaryHTML(fin)}</div>${reportButtons()}<div class="acts"><button class="btn" id="cddone">${L('تم','Done')}</button></div></div></div>`;
@@ -854,12 +859,12 @@ function renderDayStart(){
     ${isWaiterMode()?`<p class="hint">${L('اطلب من المدير يبدأ اليوم.','Ask the manager to start the day.')}</p>`:`<button class="btn crust big" id="startday">${L('بدء اليوم','Start the day')}</button>`}
   </div>`;
   if(isWaiterMode())return;
-  document.getElementById('startday').onclick=()=>askManagerPin(L('بدء اليوم','Start the day'),()=>{S.day={open:true,startAt:Date.now()};saveMeta();toast(L('بدأ اليوم الساعة ','Day started at ')+hm(S.day.startAt));route()});
+  document.getElementById('startday').onclick=()=>askManagerPin(L('بدء اليوم','Start the day'),who=>{S.day={open:true,startAt:Date.now(),openedBy:who};saveMeta();toast(L('بدأ اليوم الساعة ','Day started at ')+hm(S.day.startAt));route()});
 }
 
 // ---------- POS ----------
 let cat='all',q='',cart=[],otype='',table='',appNo='',ticketOpen=false,choosing=false,pending='';
-function daySumHTML(){const ds=daySummary(S.day.startAt,Date.now()+1);return `${L('اليوم مفتوح من','Day open since')} <b class="num">${hm(S.day.startAt)}</b> · <span class="num">${ds.count}</span> ${L('طلب','orders')} · <span class="num">${fmt0(ds.total)}</span> ${CUR()}`}
+function daySumHTML(){const ds=daySummary(S.day.startAt,Date.now()+1);return `${L('اليوم مفتوح من','Day open since')} <b class="num">${hm(S.day.startAt)}</b>${S.day.openedBy?` (${esc(S.day.openedBy)})`:''} · <span class="num">${ds.count}</span> ${L('طلب','orders')} · <span class="num">${fmt0(ds.total)}</span> ${CUR()}`}
 function renderPOS(){
   const app=document.getElementById('app');
   if(!dayOpen()){renderDayStart();return}
@@ -879,7 +884,7 @@ function renderPOS(){
   </div>
   <button class="btn cartbar" id="cartbar"></button>`;
   document.getElementById('q').addEventListener('input',e=>{q=e.target.value;drawGrid()});
-  const cdb=document.getElementById('closeday');if(cdb)cdb.onclick=()=>askManagerPin(L('إغلاق اليوم','Close the day'),openCloseDay);
+  const cdb=document.getElementById('closeday');if(cdb)cdb.onclick=()=>askManagerPin(L('إغلاق اليوم','Close the day'),who=>{closingBy=who;openCloseDay()});
   document.getElementById('cartbar').onclick=()=>{ticketOpen=true;drawTicket()};
   drawCats();drawGrid();drawTicket();drawStart();
 }
@@ -1175,7 +1180,7 @@ function renderKitchenLogin(){
       <div class="pinpad">${['1','2','3','4','5','6','7','8','9','del','0','ok'].map(k=>`<button data-k="${k}" class="${k==='del'||k==='ok'?'fn':''} num" aria-label="${k==='del'?L('مسح','Delete'):k==='ok'?L('دخول','Enter'):k}">${k==='del'?'⌫':k==='ok'?L('دخول','Enter'):k}</button>`).join('')}</div>
     </div>`;
   };
-  const check=()=>{if(pin===KITCHEN_PIN){kitchenOK=true;try{sessionStorage.setItem('yana-k','1')}catch(e){}renderKitchen()}else{pin='';draw(true)}};
+  const check=()=>{if(pin===KITCHEN_PIN||managerBy(pin)){kitchenOK=true;try{sessionStorage.setItem('yana-k','1')}catch(e){}renderKitchen()}else{pin='';draw(true)}};
   draw(false);
   app.onclick=e=>{const b=e.target.closest('[data-k]');if(!b)return;const k=b.dataset.k;
     if(k==='del')pin=pin.slice(0,-1);else if(k==='ok'){check();return}else if(pin.length<4)pin+=k;
@@ -1361,6 +1366,10 @@ function renderMenu(){
   app.innerHTML=`<h2>${L('إدارة المنيو','Menu management')}</h2><p class="sub">${EN()?`<span class="num">${allItems().length}</span> items from the Yana menu. Changes here show up in the cashier right away.`:`<span class="num">${allItems().length}</span> صنف من منيو يانا. أي تعديل هنا يظهر فوراً في الكاشير.`}</p>
   <div class="panel" style="margin-bottom:16px">
    ${FDB?`<div class="toolbar" style="margin:0 0 10px"><span style="font-size:13.5px;color:var(--muted)">${L('هذا الجهاز مسجّل دخول','This device is signed in')}</span><button class="btn ghost sm" id="fbout" type="button">${L('تسجيل خروج الجهاز','Sign this device out')}</button></div>`:''}
+   <h3 style="margin:0 0 6px;font-size:15px">${L('المشرفين','Supervisors')}</h3>
+   <p class="sub" style="margin:0 0 8px;font-size:13px">${L('لهم كل صلاحيات المدير: بدء اليوم وإغلاقه، ودخول المطبخ، وإلغاء وضع الويتر.','Full manager rights: open and close the day, kitchen access, and turning off waiter mode.')}</p>
+   <div class="stafflist">${staff().supervisors.map(w=>`<div class="srow"><input id="sn-${w.id}" data-sn="${w.id}" value="${esc(w.name)}" aria-label="${L('اسم المشرف','Supervisor name')}"><input id="sp-${w.id}" data-sp="${w.id}" value="${esc(w.pin)}" inputmode="numeric" maxlength="4" class="num" aria-label="${L('رقم الدخول','Sign-in code')}"><button class="btn ghost sm" data-sdel="${w.id}" type="button">${L('حذف','Remove')}</button></div>`).join('')}</div>
+   <div class="toolbar" style="margin:8px 0 16px"><button class="btn ghost sm" id="sadd" type="button">${L('+ إضافة مشرف','+ Add supervisor')}</button></div>
    <h3 style="margin:0 0 10px;font-size:15px">${L('الويتر وأرقام الدخول','Waiters and sign-in codes')}</h3>
    <div class="stafflist">${staff().waiters.map(w=>`<div class="srow"><input id="wn-${w.id}" data-wn="${w.id}" value="${esc(w.name)}" aria-label="${L('اسم الويتر','Waiter name')}"><input id="wp-${w.id}" data-wp="${w.id}" value="${esc(w.pin)}" inputmode="numeric" maxlength="4" class="num" aria-label="${L('رقم الدخول','Sign-in code')}"><button class="btn ghost sm" data-wdel="${w.id}" type="button">${L('حذف','Remove')}</button></div>`).join('')}</div>
    <div class="toolbar" style="margin:8px 0 14px"><button class="btn ghost sm" id="wadd" type="button">${L('+ إضافة ويتر','+ Add waiter')}</button>
@@ -1389,13 +1398,19 @@ function renderMenu(){
   const validPin=p=>/^[0-9]{4}$/.test(p);
   app.addEventListener('change',e=>{const t=e.target;
     if(t.dataset.wn){const w=staff().waiters.find(x=>x.id===t.dataset.wn);const v=t.value.trim();if(v){w.name=v;saveMeta();toast(L('تم حفظ الاسم','Name saved'))}else t.value=w.name}
-    if(t.dataset.wp){const w=staff().waiters.find(x=>x.id===t.dataset.wp);const v=t.value.trim();
+    if(t.dataset.sn){const w=staff().supervisors.find(x=>x.id===t.dataset.sn);const v=t.value.trim();if(v){w.name=v;saveMeta();toast(L('تم حفظ الاسم','Name saved'))}else t.value=w.name}
+    const pinEdit=(w)=>{const v=t.value.trim();
       if(!validPin(v)){toast(L('رقم الدخول لازم 4 أرقام','The code must be 4 digits'));t.value=w.pin;return}
-      if(v===staff().managerPin||staff().waiters.some(x=>x!==w&&x.pin===v)){toast(L('هذا الرقم مستخدم','This code is already used'));t.value=w.pin;return}
-      w.pin=v;saveMeta();toast(L('تم حفظ رقم الدخول','Code saved'))}
-    if(t.id==='mgrpin'){const v=t.value.trim();if(!validPin(v)||staff().waiters.some(x=>x.pin===v)){toast(L('رقم المدير لازم 4 أرقام وما يتكرر','Manager code must be 4 unique digits'));t.value=staff().managerPin;return}staff().managerPin=v;saveMeta();toast(L('تم حفظ رقم المدير','Manager code saved'))}
+      if(v!==w.pin&&allPins().includes(v)){toast(L('هذا الرقم مستخدم','This code is already used'));t.value=w.pin;return}
+      w.pin=v;saveMeta();toast(L('تم حفظ رقم الدخول','Code saved'))};
+    if(t.dataset.wp)pinEdit(staff().waiters.find(x=>x.id===t.dataset.wp));
+    if(t.dataset.sp)pinEdit(staff().supervisors.find(x=>x.id===t.dataset.sp));
+    if(t.id==='mgrpin'){const v=t.value.trim();if(!validPin(v)||(v!==staff().managerPin&&allPins().includes(v))){toast(L('رقم المدير لازم 4 أرقام وما يتكرر','Manager code must be 4 unique digits'));t.value=staff().managerPin;return}staff().managerPin=v;saveMeta();toast(L('تم حفظ رقم المدير','Manager code saved'))}
   });
-  document.getElementById('wadd').onclick=()=>{const used=new Set(staff().waiters.map(w=>w.pin).concat(staff().managerPin));let p;do{p=String(1000+Math.floor(Math.random()*9000))}while(used.has(p));staff().waiters.push({id:'w'+Date.now(),name:L('ويتر جديد','New waiter'),pin:p});saveMeta();renderMenu()};
+  const freePin=()=>{const used=new Set(allPins());let p;do{p=String(1000+Math.floor(Math.random()*9000))}while(used.has(p));return p};
+  document.getElementById('sadd').onclick=()=>{staff().supervisors.push({id:'s'+Date.now(),name:L('مشرف جديد','New supervisor'),pin:freePin()});saveMeta();renderMenu()};
+  app.querySelectorAll('[data-sdel]').forEach(b=>b.onclick=()=>{staff().supervisors=staff().supervisors.filter(w=>w.id!==b.dataset.sdel);saveMeta();renderMenu()});
+  document.getElementById('wadd').onclick=()=>{const used=new Set(allPins());let p;do{p=String(1000+Math.floor(Math.random()*9000))}while(used.has(p));staff().waiters.push({id:'w'+Date.now(),name:L('ويتر جديد','New waiter'),pin:p});saveMeta();renderMenu()};
   app.querySelectorAll('[data-wdel]').forEach(b=>b.onclick=()=>{if(staff().waiters.length<=1){toast(L('لازم يبقى ويتر واحد على الأقل','Keep at least one waiter'));return}staff().waiters=staff().waiters.filter(w=>w.id!==b.dataset.wdel);saveMeta();renderMenu()});
   document.getElementById('tcount').onchange=e=>{S.tables=Math.min(60,Math.max(1,parseInt(e.target.value)||30));e.target.value=S.tables;saveMeta();toast(L('تم تحديث عدد الطاولات','Table count updated'))};
   document.getElementById('mcat').onchange=e=>{mcat=e.target.value;renderMenu()};
