@@ -539,6 +539,10 @@ const MODEN={};Object.values(G).forEach(g=>g.opts.forEach(o=>MODEN[o[0]]=o[2]));
 const DRINKMODS=new Set(G.frdrink.opts.map(o=>o[0]));
 const modN=m=>EN()?(MODEN[m]||m):m;
 const modsTxt=ms=>ms.map(modN).join(L('، ',', '));
+// both languages, for tickets, invoices and the kitchen / bar screens
+const biAr=l=>l.name;
+const biEn=l=>(l.id&&ENNAME[l.id])||MODEN[l.name]||'';
+const biMods=ms=>({ar:ms.join('، '),en:ms.map(m=>MODEN[m]||m).join(', ')});
 function modsFor(it){
   const n=it.name,c=it.cat,out=[];
   if(c==='hot'||c==='cold'){
@@ -848,7 +852,7 @@ async function ticketCanvas(o,station='all'){
   box.innerHTML=`${station==='b'?hdr(L('البار','BAR')):station==='k'?hdr(L('المطبخ','KITCHEN')):''}<div style="text-align:center;font-size:44px;font-weight:700">#${o.no}</div>
    <div style="text-align:center;font-size:24px;font-weight:700;border-bottom:3px solid #000;padding-bottom:6px">${esc(typeName(o))}</div>
    <div style="text-align:center;font-size:16px;margin:4px 0 8px">${new Date(o.t).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}${o.by?' · '+esc(o.by):''}</div>
-   ${lines.map(l=>`<div style="border-bottom:1px dashed #000;padding:6px 0"><div style="font-size:24px;font-weight:700">${l.qty}× ${esc(l.id?nm(l):modN(l.name))}</div>${l.mods.length?`<div style="font-size:18px">${esc(modsTxt(l.mods))}</div>`:''}${l.note?`<div style="font-size:19px;font-weight:700">✎ ${esc(l.note)}</div>`:''}</div>`).join('')}`;
+   ${lines.map(l=>`<div style="border-bottom:1px dashed #000;padding:6px 0"><div style="font-size:24px;font-weight:700">${l.qty}× ${esc(biAr(l))}</div>${biEn(l)?`<div style="font-size:19px;font-weight:700;direction:ltr;text-align:left">${esc(biEn(l))}</div>`:''}${l.mods.length?`<div style="font-size:18px">${esc(biMods(l.mods).ar)}</div><div style="font-size:16px;direction:ltr;text-align:left">${esc(biMods(l.mods).en)}</div>`:''}${l.note?`<div style="font-size:19px;font-weight:700">✎ ${esc(l.note)}</div>`:''}</div>`).join('')}`;
   document.body.appendChild(box);
   try{return await canvasOf(box)}finally{box.remove()}
 }
@@ -1227,7 +1231,7 @@ function showReceipt(o,fromList){
       <hr>
       <table><tr><td>${L('رقم الطلب','Order no.')}</td><td class="num">#${o.no}</td></tr><tr><td>${L('التاريخ','Date')}</td><td class="num">${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</td></tr><tr><td>${L('النوع','Type')}</td><td>${esc(typeName(o))}</td></tr>${o.by?`<tr><td>${L('الويتر','Waiter')}</td><td>${esc(o.by)}</td></tr>`:''}</table>
       <hr>
-      <table>${o.lines.map(l=>`<tr><td><span class="num">${l.qty}×</span> ${esc(nm(l))}${l.mods.length?`<div class="tiny">${esc(modsTxt(l.mods))}</div>`:''}${l.note?`<div class="tiny">${L('ملاحظة:','Note:')} ${esc(l.note)}</div>`:''}</td><td class="num">${fmt(l.unit*l.qty)}</td></tr>`).join('')}</table>
+      <table>${o.lines.map(l=>`<tr><td><span class="num">${l.qty}×</span> ${esc(biAr(l))}${biEn(l)?`<div class="tiny" dir="ltr" style="text-align:start">${esc(biEn(l))}</div>`:''}${l.mods.length?`<div class="tiny">${esc(biMods(l.mods).ar)} · <span dir="ltr">${esc(biMods(l.mods).en)}</span></div>`:''}${l.note?`<div class="tiny">${L('ملاحظة:','Note:')} ${esc(l.note)}</div>`:''}</td><td class="num">${fmt(l.unit*l.qty)}</td></tr>`).join('')}</table>
       <hr>
       <table><tr><td>${L('المجموع غير شامل الضريبة','Total excl. VAT')}</td><td class="num">${fmt(o.total-vat)}</td></tr><tr><td>${L('ضريبة القيمة المضافة 15%','VAT 15%')}</td><td class="num">${fmt(vat)}</td></tr><tr style="font-weight:700;font-size:15px"><td>${L('الإجمالي شامل الضريبة','Total incl. VAT')}</td><td class="num">${fmt(o.total)}</td></tr></table>
       <div class="qr" id="qr"></div>
@@ -1307,7 +1311,7 @@ function drawK(){
     const sts=Object.keys(o.kds).filter(s=>(kst==='all'||s===kst)&&o.kds[s]!=='ready');
     if(!sts.length)return;
     const lines=o.lines.filter(l=>sts.includes(l.st));
-    if(sts.includes('b'))o.lines.forEach(l=>l.mods.filter(m=>DRINKMODS.has(m)).forEach(m=>lines.push({id:'',name:modN(m),qty:l.qty,mods:[L('مع ','with ')+nm(l)],st:'b'})));
+    if(sts.includes('b'))o.lines.forEach(l=>l.mods.filter(m=>DRINKMODS.has(m)).forEach(m=>lines.push({id:'',name:m,qty:l.qty,mods:[L('مع ','with ')+nm(l)],st:'b'})));
     const state=sts.some(s=>o.kds[s]==='new')?'new':'prep';
     cards.push({o,sts,lines,state,mins:(now-o.t)/60e3});
   });
@@ -1317,7 +1321,7 @@ function drawK(){
     return `<article class="kcard ${c.mins>=15?'c':c.mins>=8?'w':''}">
       <div class="kh"><b class="num">#${c.o.no}</b><span class="tm num">${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}</span></div>
       <div class="kmeta"><span class="chip">${esc(typeName(c.o))}</span>${c.o.by?`<span class="chip">👤 ${esc(c.o.by)}</span>`:''}${c.sts.map(s=>`<span class="chip st-${s}">${stn(s)}</span>`).join('')}<span class="chip ${c.state}">${c.state==='new'?L('جديد','New'):L('قيد التحضير','Preparing')}</span>${Object.keys(c.o.kds).filter(s=>s!==kst).map(s=>`<span class="chip">${stn(s)}: ${c.o.kds[s]==='ready'?L('جاهز','ready'):L('لم يجهز','not ready')}</span>`).join('')}</div>
-      <ul class="kl">${c.lines.map(l=>`<li><span class="q num">${l.qty}×</span><span>${esc(nm(l))}${l.mods.length?`<small>${esc(modsTxt(l.mods))}</small>`:''}${l.note?`<em class="kn">${L('ملاحظة:','Note:')} ${esc(l.note)}</em>`:''}</span></li>`).join('')}</ul>
+      <ul class="kl">${c.lines.map(l=>`<li><span class="q num">${l.qty}×</span><span>${esc(biAr(l))}${biEn(l)?`<small dir="ltr" style="text-align:start;color:var(--ink);font-weight:600">${esc(biEn(l))}</small>`:''}${l.mods.length?`<small>${esc(biMods(l.mods).ar)}</small><small dir="ltr" style="text-align:start">${esc(biMods(l.mods).en)}</small>`:''}${l.note?`<em class="kn">${L('ملاحظة:','Note:')} ${esc(l.note)}</em>`:''}</span></li>`).join('')}</ul>
       <div class="kact"><button class="btn ${c.state==='new'?'':'crust'}" data-o="${c.o.id}" data-s="${c.sts.join(',')}" data-n="${c.state==='new'?'prep':'ready'}">${c.state==='new'?L('ابدأ التحضير','Start preparing'):L('جاهز','Ready')}</button></div>
     </article>`}).join('')||`<p class="empty" style="grid-column:1/-1">${L('ما فيه طلبات تنتظر التحضير.','No orders waiting.')}</p>`;
   g.onclick=e=>{const b=e.target.closest('[data-o]');if(!b)return;const o=S.orders.find(x=>x.id===b.dataset.o);
@@ -1372,7 +1376,7 @@ function openTableBill(n){
       <hr>
       <table><tr><td>${L('الطاولة','Table')}</td><td class="num" style="font-weight:700;font-size:16px">${esc(n)}</td></tr><tr><td>${L('الطلبات','Orders')}</td><td class="num">${os.map(o=>'#'+o.no).join(' ')}</td></tr><tr><td>${L('التاريخ','Date')}</td><td class="num">${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</td></tr></table>
       <hr>
-      <table>${lines.map(l=>`<tr><td><span class="num">${l.qty}×</span> ${esc(nm(l))}${l.mods.length?`<div class="tiny">${esc(modsTxt(l.mods))}</div>`:''}</td><td class="num">${fmt(l.unit*l.qty)}</td></tr>`).join('')}</table>
+      <table>${lines.map(l=>`<tr><td><span class="num">${l.qty}×</span> ${esc(biAr(l))}${biEn(l)?`<div class="tiny" dir="ltr" style="text-align:start">${esc(biEn(l))}</div>`:''}${l.mods.length?`<div class="tiny">${esc(biMods(l.mods).ar)} · <span dir="ltr">${esc(biMods(l.mods).en)}</span></div>`:''}</td><td class="num">${fmt(l.unit*l.qty)}</td></tr>`).join('')}</table>
       <hr>
       <table><tr><td>${L('المجموع غير شامل الضريبة','Total excl. VAT')}</td><td class="num">${fmt(total-vat)}</td></tr><tr><td>${L('ضريبة القيمة المضافة 15%','VAT 15%')}</td><td class="num">${fmt(vat)}</td></tr><tr style="font-weight:700;font-size:15px"><td>${L('الإجمالي شامل الضريبة','Total incl. VAT')}</td><td class="num">${fmt(total)}</td></tr></table>
       <div class="qr" id="qr"></div>
