@@ -793,7 +793,8 @@ function openUserMenu(){
 
 
 // ---------- Epson TM printer (ePOS-Print over the shop network) ----------
-const printerCfg=()=>{if(!S.printer)S.printer={ip:'',autoInvoice:false,autoKitchen:false};return S.printer};
+const printerCfg=()=>{if(!S.printer)S.printer={ip:'',autoInvoice:false,autoKitchen:false};if(S.printer.barIp==null){S.printer.barIp='';S.printer.autoBar=true}return S.printer};
+const barPrinterOn=()=>!!(window.YANA_FB&&printerCfg().barIp);
 const printerOn=()=>!!(window.YANA_FB&&printerCfg().ip);
 // turn a canvas into a 1-bit raster 576 dots wide (72mm print area) for ePOS-Print
 function rasterB64(src){
@@ -805,8 +806,8 @@ function rasterB64(src){
   let s='';for(let i=0;i<out.length;i+=0x8000)s+=String.fromCharCode.apply(null,out.subarray(i,i+0x8000));
   return {w:W,h:H,b64:btoa(s)};
 }
-async function eposSend(canvases){
-  const ip=printerCfg().ip.trim();if(!ip)throw new Error('noip');
+async function eposSend(canvases,ipArg){
+  const ip=(ipArg||printerCfg().ip).trim();if(!ip)throw new Error('noip');
   const body=canvases.map(c=>{const r=rasterB64(c);return `<image width="${r.w}" height="${r.h}" color="color_1" mode="mono">${r.b64}</image><feed line="2"/><cut type="feed"/>`}).join('');
   const xml=`<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><epos-print xmlns="http://www.epson-pos.com/schemas/2011/03/epos-print">${body}</epos-print></s:Body></s:Envelope>`;
   const ctl=new AbortController();const tm=setTimeout(()=>ctl.abort(),15000);
@@ -816,7 +817,8 @@ async function eposSend(canvases){
   const t=await res.text();
   if(!/success="true"/.test(t)){const m=t.match(/code="([^"]*)"/);throw new Error('printer:'+(m?m[1]:res.status))}
 }
-function printErrText(e){const m=(e&&e.message)||'';
+function printErrText(e){let m=(e&&e.message)||'';const isBar=/\|bar$/.test(m);m=m.replace(/\|bar$/,'');const pre=isBar?L('طابعة البار: ','Bar printer: '):'';return pre+printErrText0(m)}
+function printErrText0(m){
   if(m==='noip')return L('اكتب عنوان الطابعة في شاشة المنيو أول.','Enter the printer address on the Menu screen first.');
   if(m==='net')return L('ما قدرنا نوصل للطابعة. تأكد إنها شغّالة وعلى نفس شبكة المحل، وافتح عنوانها مرة في المتصفح ووافق على الشهادة.','Could not reach the printer. Check it is on and on the shop network, then open its address once in the browser and accept the certificate.');
   if(/EPTR_REC_EMPTY/.test(m))return L('ورق الطابعة خلص.','The printer is out of paper.');
@@ -824,23 +826,30 @@ function printErrText(e){const m=(e&&e.message)||'';
   return L('الطابعة رفضت الطباعة: ','The printer refused the job: ')+m.replace('printer:','');}
 async function canvasOf(el){return html2canvas(el,{scale:2,backgroundColor:'#ffffff'})}
 // kitchen / bar ticket in large type
-async function ticketCanvas(o){
+const drinkLines=o=>o.lines.filter(l=>l.st==='b').concat(o.lines.flatMap(l=>l.mods.filter(m=>DRINKMODS.has(m)).map(m=>({id:'',name:m,qty:l.qty,mods:[L('مع ','with ')+nm(l)],note:''}))));
+// station: 'k' food only, 'b' drinks only, 'all' everything that needs preparing
+function ticketLines(o,station){if(station==='b')return drinkLines(o);if(station==='k')return o.lines.filter(l=>l.st==='k');return o.lines.filter(l=>l.st!=='v')}
+async function ticketCanvas(o,station='all'){
   const box=document.createElement('div');
   box.style.cssText='position:fixed;left:-10000px;top:0;width:380px;background:#fff;color:#000;padding:10px;font:600 20px/1.35 "IBM Plex Sans Arabic",Tahoma,sans-serif;direction:'+(EN()?'ltr':'rtl');
-  const lines=o.lines.filter(l=>l.st!=='v');
-  box.innerHTML=`<div style="text-align:center;font-size:44px;font-weight:700">#${o.no}</div>
+  const lines=ticketLines(o,station);
+  box.innerHTML=`${station==='b'?`<div style="text-align:center;font-size:20px;font-weight:700;background:#000;color:#fff;padding:2px">${L('البار','BAR')}</div>`:station==='k'?`<div style="text-align:center;font-size:20px;font-weight:700;background:#000;color:#fff;padding:2px">${L('المطبخ','KITCHEN')}</div>`:''}<div style="text-align:center;font-size:44px;font-weight:700">#${o.no}</div>
    <div style="text-align:center;font-size:24px;font-weight:700;border-bottom:3px solid #000;padding-bottom:6px">${esc(typeName(o))}</div>
    <div style="text-align:center;font-size:16px;margin:4px 0 8px">${new Date(o.t).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}${o.by?' · '+esc(o.by):''}</div>
-   ${lines.map(l=>`<div style="border-bottom:1px dashed #000;padding:6px 0"><div style="font-size:24px;font-weight:700">${l.qty}× ${esc(nm(l))}</div>${l.mods.length?`<div style="font-size:18px">${esc(modsTxt(l.mods))}</div>`:''}${l.note?`<div style="font-size:19px;font-weight:700">✎ ${esc(l.note)}</div>`:''}</div>`).join('')}`;
+   ${lines.map(l=>`<div style="border-bottom:1px dashed #000;padding:6px 0"><div style="font-size:24px;font-weight:700">${l.qty}× ${esc(l.id?nm(l):modN(l.name))}</div>${l.mods.length?`<div style="font-size:18px">${esc(modsTxt(l.mods))}</div>`:''}${l.note?`<div style="font-size:19px;font-weight:700">✎ ${esc(l.note)}</div>`:''}</div>`).join('')}`;
   document.body.appendChild(box);
   try{return await canvasOf(box)}finally{box.remove()}
 }
-async function printOrder(o,{invoice=true,kitchen=false}={}){
+async function printOrder(o,{invoice=true,kitchen=false,bar=false}={}){
   const cs=[];
+  // with a bar printer, the kitchen ticket carries food only; drinks go to the bar printer
+  const kStation=barPrinterOn()?'k':'all';
   if(invoice){const el=document.getElementById('rcpt');if(el)cs.push(await canvasOf(el))}
-  if(kitchen&&o.lines.some(l=>l.st!=='v'))cs.push(await ticketCanvas(o));
-  if(!cs.length)return;
-  await eposSend(cs);
+  if(kitchen&&ticketLines(o,kStation).length)cs.push(await ticketCanvas(o,kStation));
+  const jobs=[];
+  if(cs.length)jobs.push(eposSend(cs));
+  if(bar&&barPrinterOn()&&drinkLines(o).length)jobs.push(ticketCanvas(o,'b').then(c=>eposSend([c],printerCfg().barIp)).catch(e=>{throw new Error((e.message||'')+'|bar')}));
+  const rs=await Promise.allSettled(jobs);const bad=rs.find(r=>r.status==='rejected');if(bad)throw bad.reason;
 }
 
 // ---------- business day ----------
@@ -1159,7 +1168,8 @@ async function placeOrder(){
   cart=[];table='';appNo='';otype='';choosing=false;pending='';ticketOpen=false;placing=false;
   showReceipt(o);drawGrid();drawTicket();drawStart();updateBadge();
   const pc=printerCfg();
-  if(printerOn()&&(pc.autoInvoice||pc.autoKitchen))setTimeout(()=>printOrder(o,{invoice:pc.autoInvoice,kitchen:pc.autoKitchen}).catch(e=>toast(printErrText(e))),400);
+  const wantMain=printerOn()&&(pc.autoInvoice||pc.autoKitchen),wantBar=barPrinterOn()&&pc.autoBar;
+  if(wantMain||wantBar)setTimeout(()=>printOrder(o,{invoice:printerOn()&&pc.autoInvoice,kitchen:printerOn()&&pc.autoKitchen,bar:wantBar}).catch(e=>toast(printErrText(e))),400);
 }
 function tlv(fields){const enc=new TextEncoder();const parts=[];fields.forEach((v,i)=>{const b=enc.encode(String(v));parts.push(i+1,b.length,...b)});let s='';parts.forEach(c=>s+=String.fromCharCode(c));return btoa(s)}
 function waNum(v){let d=String(v).replace(/[^0-9]/g,'');if(d.startsWith('00'))d=d.slice(2);if(d.startsWith('05'))d='966'+d.slice(1);else if(d.startsWith('5')&&d.length===9)d='966'+d;return /^9665[0-9]{8}$/.test(d)?d:''}
@@ -1200,7 +1210,7 @@ function showReceipt(o,fromList){
       <div class="qr" id="qr"></div>
       <p class="c tiny" style="margin:8px 0 0">${L('رمز QR بصيغة المرحلة الأولى. الربط مع منصة فاتورة غير مفعّل في التجربة.','QR code in Phase 1 format. Fatoora integration is not active in this trial.')}</p>
     </div>
-    ${window.YANA_FB?`<div style="display:flex;gap:8px;margin-top:14px"><button class="btn" id="printbtn" style="flex:1">🖨️ ${L('طباعة الفاتورة','Print invoice')}</button>${printerOn()&&o.lines.some(l=>l.st!=='v')?`<button class="btn ghost" id="printk" style="flex:1">🧾 ${L('تذكرة المطبخ','Kitchen ticket')}</button>`:''}</div>`:''}
+    ${window.YANA_FB?`<div style="display:flex;gap:8px;margin-top:14px"><button class="btn" id="printbtn" style="flex:1">🖨️ ${L('طباعة الفاتورة','Print invoice')}</button>${printerOn()&&ticketLines(o,barPrinterOn()?'k':'all').length?`<button class="btn ghost" id="printk" style="flex:1">🧾 ${L('تذكرة المطبخ','Kitchen ticket')}</button>`:''}${barPrinterOn()&&drinkLines(o).length?`<button class="btn ghost" id="printb" style="flex:1">🥤 ${L('تذكرة البار','Bar ticket')}</button>`:''}</div>`:''}
     <button class="btn crust" id="pdfbtn" style="margin-top:${window.YANA_FB?8:14}px;width:100%">${pdfLabel()}</button>
     <p class="note" id="pdfnote" style="margin-top:6px">${L('في الجوال تنفتح قائمة المشاركة وتختار التطبيق والمحادثة. في الكمبيوتر تنحفظ الفاتورة كملف.','On a phone the share menu opens so you can pick an app and chat. On a computer the invoice is saved as a file.')}</p>
     ${waReady()?`<a class="btn ghost" style="margin-top:8px;width:100%;text-decoration:none;display:flex;justify-content:center;gap:6px" target="_blank" rel="noopener" href="${waLink(waTarget(),orderText(o))}">${L('إعادة إرسال الطلب إلى','Resend order to')} <span class="num">${esc(waDest())}</span></a>`:''}
@@ -1217,6 +1227,7 @@ function showReceipt(o,fromList){
   const pb=document.getElementById('printbtn');if(pb&&printerOn())pb.onclick=async()=>{pb.disabled=true;const old=pb.textContent;pb.textContent=L('جاري الطباعة…','Printing…');try{await printOrder(o,{invoice:true});toast(L('انطبعت الفاتورة','Invoice printed'))}catch(e){toast(printErrText(e))}finally{pb.disabled=false;pb.textContent=old}};
   else if(pb)pb.onclick=()=>{document.body.classList.add('printing-rcpt');setTimeout(()=>{window.print();setTimeout(()=>document.body.classList.remove('printing-rcpt'),500)},50)};
   const pk=document.getElementById('printk');if(pk)pk.onclick=async()=>{pk.disabled=true;try{await printOrder(o,{invoice:false,kitchen:true});toast(L('انطبعت تذكرة المطبخ','Kitchen ticket printed'))}catch(e){toast(printErrText(e))}finally{pk.disabled=false}};
+  const pbb=document.getElementById('printb');if(pbb)pbb.onclick=async()=>{pbb.disabled=true;try{await printOrder(o,{invoice:false,bar:true});toast(L('انطبعت تذكرة البار','Bar ticket printed'))}catch(e){toast(printErrText(e))}finally{pbb.disabled=false}};
   document.getElementById('pdfbtn').onclick=async e=>{
     const b=e.currentTarget,note=document.getElementById('pdfnote');b.disabled=true;b.textContent=L('جاري تجهيز الملف…','Preparing the file…');
     try{
@@ -1471,7 +1482,10 @@ function renderMenu(){
    ${FDB?`<div class="toolbar" style="margin:0 0 10px"><span style="font-size:13.5px;color:var(--muted)">${L('هذا الجهاز مسجّل دخول','This device is signed in')}</span><button class="btn ghost sm" id="fbout" type="button">${L('تسجيل خروج الجهاز','Sign this device out')}</button></div>`:''}
    ${window.YANA_FB?`<h3 style="margin:0 0 8px;font-size:15px">🖨️ ${L('الطابعة (Epson TM-m30II)','Printer (Epson TM-m30II)')}</h3>
    <div class="toolbar" style="margin:0 0 6px"><label for="prip" style="font-size:13.5px;color:var(--muted)">${L('عنوان الطابعة (IP)','Printer address (IP)')}</label><input id="prip" dir="ltr" inputmode="decimal" placeholder="192.168.1.50" value="${esc(printerCfg().ip)}" style="width:170px"><button class="btn ghost sm" id="prtest" type="button">${L('طباعة تجربة','Test print')}</button>${printerCfg().ip?`<a href="https://${esc(printerCfg().ip)}/" target="_blank" rel="noopener" style="font-size:13px">${L('فتح الطابعة لقبول الشهادة','Open printer to accept certificate')}</a>`:''}</div>
-   <div class="toolbar" style="margin:0 0 16px"><label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="prinv" ${printerCfg().autoInvoice?'checked':''}> ${L('اطبع الفاتورة تلقائياً عند الإرسال','Print the invoice automatically when sent')}</label><label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="prkit" ${printerCfg().autoKitchen?'checked':''}> ${L('اطبع تذكرة المطبخ تلقائياً','Print the kitchen ticket automatically')}</label></div>`:''}
+   <div class="toolbar" style="margin:0 0 6px"><label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="prinv" ${printerCfg().autoInvoice?'checked':''}> ${L('اطبع الفاتورة تلقائياً عند الإرسال','Print the invoice automatically when sent')}</label><label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="prkit" ${printerCfg().autoKitchen?'checked':''}> ${L('اطبع تذكرة المطبخ تلقائياً','Print the kitchen ticket automatically')}</label></div>
+   <h3 style="margin:14px 0 8px;font-size:15px">🥤 ${L('طابعة البار (المشروبات)','Bar printer (drinks)')}</h3>
+   <div class="toolbar" style="margin:0 0 6px"><label for="prbip" style="font-size:13.5px;color:var(--muted)">${L('عنوان طابعة البار (IP)','Bar printer address (IP)')}</label><input id="prbip" dir="ltr" inputmode="decimal" placeholder="192.168.100.27" value="${esc(printerCfg().barIp)}" style="width:170px"><button class="btn ghost sm" id="prbtest" type="button">${L('طباعة تجربة','Test print')}</button>${printerCfg().barIp?`<a href="https://${esc(printerCfg().barIp)}/" target="_blank" rel="noopener" style="font-size:13px">${L('فتح طابعة البار لقبول الشهادة','Open bar printer to accept certificate')}</a>`:''}</div>
+   <div class="toolbar" style="margin:0 0 16px"><label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="prbar" ${printerCfg().autoBar?'checked':''}> ${L('اطبع المشروبات تلقائياً في طابعة البار عند الإرسال','Print drinks automatically on the bar printer when sent')}</label></div>`:''}
    <div class="toolbar" style="margin:0"><label for="tcount" style="font-size:14px;font-weight:600">${L('عدد الطاولات في المحل','Number of tables')}</label><input id="tcount" type="number" min="1" max="60" value="${tableCount()}" style="width:80px"></div>
   </div>
   <div class="panel">
@@ -1497,6 +1511,13 @@ function renderMenu(){
   if(prip){prip.onchange=()=>{printerCfg().ip=prip.value.trim().replace(/^https?:\/\//,'').replace(/\/.*$/,'');saveMeta();toast(L('تم حفظ عنوان الطابعة','Printer address saved'));renderMenu()};
     document.getElementById('prinv').onchange=e=>{printerCfg().autoInvoice=e.target.checked;saveMeta()};
     document.getElementById('prkit').onchange=e=>{printerCfg().autoKitchen=e.target.checked;saveMeta()};
+    const cleanIp=v=>v.trim().replace(/^https?:\/\//,'').replace(/\/.*$/,'');
+    document.getElementById('prbip').onchange=e=>{printerCfg().barIp=cleanIp(e.target.value);saveMeta();toast(L('تم حفظ عنوان طابعة البار','Bar printer address saved'));renderMenu()};
+    document.getElementById('prbar').onchange=e=>{printerCfg().autoBar=e.target.checked;saveMeta()};
+    document.getElementById('prbtest').onclick=async e=>{const b=e.currentTarget;b.disabled=true;
+      const box=document.createElement('div');box.style.cssText='position:fixed;left:-10000px;top:0;width:380px;background:#fff;color:#000;padding:12px;text-align:center;font:700 26px/1.5 Tahoma,sans-serif';
+      box.innerHTML=`<div style="font-size:40px">${L('البار','BAR')}</div><div>${L('تجربة طابعة البار ✓','Bar printer test ✓')}</div><div style="font-size:18px">${new Date().toLocaleString('en-GB')}</div>`;document.body.appendChild(box);
+      try{if(!printerCfg().barIp)throw new Error('noip');const c=await canvasOf(box);await eposSend([c],printerCfg().barIp);toast(L('طابعة البار شغّالة ✓','Bar printer works ✓'))}catch(err){toast(L('طابعة البار: ','Bar printer: ')+printErrText0(err.message||''))}finally{box.remove();b.disabled=false}};
     document.getElementById('prtest').onclick=async e=>{const b=e.currentTarget;b.disabled=true;
       const box=document.createElement('div');box.style.cssText='position:fixed;left:-10000px;top:0;width:380px;background:#fff;color:#000;padding:12px;text-align:center;font:700 26px/1.5 Tahoma,sans-serif';
       box.innerHTML=`<div style="font-size:40px">${L(SELLER.shopAr,SELLER.shopEn)}</div><div>${L('تجربة الطابعة ✓','Printer test ✓')}</div><div style="font-size:18px">${new Date().toLocaleString('en-GB')}</div>`;document.body.appendChild(box);
