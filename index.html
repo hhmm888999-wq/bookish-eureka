@@ -301,6 +301,15 @@ a.btn[aria-disabled="true"]{opacity:.4;pointer-events:none}
 .xg ul{list-style:none;margin:0;padding:0;display:grid;gap:3px;font-size:14px}
 .xg small{display:block;color:var(--muted);font-size:12px}
 .xcard .kact{margin-top:auto}
+.tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px}
+.tcell{border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:2px;min-height:96px;text-align:start}
+.tcell b{font-size:26px;line-height:1.1}
+.tcell.free{border:1px dashed var(--line);color:var(--muted)}
+.tcell.free span{font-size:13px}
+.tcell.busy{border:2px solid var(--crust);background:var(--crust-soft);color:var(--ink)}
+.tcell.busy b{color:var(--crust)}
+.tcell.busy span{font-weight:700}
+.tcell.busy small{font-size:11.5px;color:var(--muted)}
 .rdgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
 .rdcard{background:var(--surface);border:2px solid var(--good);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:6px}
 .rdcard.app{border-color:var(--crust)}
@@ -448,6 +457,7 @@ table.sheet-t{width:100%;border-collapse:collapse;font-size:14px;min-width:560px
       <a href="#pos"><span id="n-pos">الكاشير</span></a>
       <a href="#kitchen"><span id="n-kitchen">المطبخ</span> <span class="pill num" id="kcount">0</span></a>
       <a href="#bar"><span id="n-bar">البار</span> <span class="pill num" id="bcount">0</span></a>
+      <a href="#tables"><span id="n-tables">الطاولات</span> <span class="pill num" id="tcountb">0</span></a>
       <a href="#ready"><span id="n-ready">جاهز</span> <span class="pill num green" id="rcount">0</span></a>
       <a href="#invoices"><span id="n-invoices">الفواتير</span></a>
       <a href="#sales"><span id="n-sales">سجل المبيعات</span></a>
@@ -603,6 +613,7 @@ function refreshView(kind){
   const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
   if(v==='kitchen'||v==='bar'){if(document.getElementById('kgrid'))drawK();return}
   if(v==='ready'){drawReady();return}
+  if(v==='tables'){if(!modal)drawTables();return}
   if(v==='invoices'){if(!modal)drawInv();return}
   if(v==='pos'||v===''){const d=dayOpen();if(lastDayOpen!==null&&d!==lastDayOpen&&!modal)route(true);lastDayOpen=d;
     if(kind==='meta'&&!modal&&!typing&&document.getElementById('grid')){drawGrid()}
@@ -1318,7 +1329,66 @@ function drawK(){
 }
 function updateBadge(){const n=S.orders.filter(o=>o.status==='open').length;const kn=S.orders.filter(o=>o.status==='open'&&o.kds.k&&o.kds.k!=='ready').length,bn=S.orders.filter(o=>o.status==='open'&&o.kds.b&&o.kds.b!=='ready').length;
   const el=document.getElementById('kcount');el.textContent=kn;el.hidden=!kn;const be=document.getElementById('bcount');be.textContent=bn;be.hidden=!bn;
+  const tb=Object.keys(openTables()).length;const tbe=document.getElementById('tcountb');if(tbe){tbe.textContent=tb;tbe.hidden=!tb}
   const r=S.orders.filter(o=>o.status==='ready').length;const rc=document.getElementById('rcount');rc.textContent=r;rc.hidden=!r}
+
+
+// ---------- Tables: open dine-in orders and the table bill ----------
+const dayFrom=()=>{if(dayOpen())return S.day.startAt;const d=new Date();d.setHours(0,0,0,0);return d.getTime()};
+function openTables(){
+  const m={};S.orders.filter(o=>o.type==='in'&&o.table&&!o.billed&&o.t>=dayFrom()).forEach(o=>{(m[o.table]=m[o.table]||[]).push(o)});
+  return m;
+}
+function billLines(orders){
+  const m=new Map();
+  orders.forEach(o=>o.lines.forEach(l=>{const k=l.id+'|'+l.mods.join(',')+'|'+(l.note||'')+'|'+l.unit;const x=m.get(k);if(x)x.qty+=l.qty;else m.set(k,Object.assign({},l))}));
+  return [...m.values()];
+}
+let ttimer=null;
+function renderTables(){
+  const app=document.getElementById('app');
+  app.innerHTML=`<h2>${L('الطاولات','Tables')}</h2><p class="sub">${L('الطاولات اللي عليها طلبات ما انقفل حسابها. اضغط على الطاولة لعرض فاتورتها وطباعتها.','Tables with orders that have not been billed yet. Tap a table to view and print its bill.')}</p><div id="tgrid" class="tgrid"></div>`;
+  drawTables();clearInterval(ttimer);ttimer=setInterval(()=>{if(location.hash==='#tables'&&!document.getElementById('layer').innerHTML)drawTables()},20000);
+}
+function drawTables(){
+  const g=document.getElementById('tgrid');if(!g)return;
+  const ot=openTables(),now=Date.now();
+  g.innerHTML=Array.from({length:tableCount()},(_,i)=>String(i+1)).map(n=>{const os=ot[n];
+    if(!os)return `<div class="tcell free"><b class="num">${n}</b><span>${L('فاضية','Free')}</span></div>`;
+    const tot=os.reduce((s,o)=>s+o.total,0),first=Math.min(...os.map(o=>o.t)),pend=os.some(o=>o.status==='open');
+    return `<button class="tcell busy" data-tbl="${n}"><b class="num">${n}</b><span class="num">${fmt0(tot)} ${CUR()}</span><small><span class="num">${os.length}</span> ${L('طلب','orders')} · <span class="num">${Math.floor((now-first)/60e3)}</span> ${L('د','min')}${pend?' · '+L('يتحضّر','preparing'):''}</small></button>`}).join('');
+  g.onclick=e=>{const b=e.target.closest('[data-tbl]');if(b)openTableBill(b.dataset.tbl)};
+}
+function openTableBill(n){
+  const os=(openTables()[n]||[]).sort((a,b)=>a.t-b.t);if(!os.length){drawTables();return}
+  const lines=billLines(os),total=lines.reduce((s,l)=>s+l.unit*l.qty,0),vat=total*15/115,d=new Date();
+  const Ly=document.getElementById('layer');
+  Ly.innerHTML=`<div class="scrim" id="scrim"><div class="sheet" role="dialog" aria-modal="true" aria-label="${L('فاتورة الطاولة','Table bill')}">
+    <div class="sheet-top">${backBtn('tbback')}</div>
+    <div class="receipt" id="rcpt">
+      <div class="c"><h5>${L(SELLER.shopAr,SELLER.shopEn)}</h5><div>YANA Bakery &amp; Cafe</div><div class="tiny">${SELLER.ar}</div><div class="tiny">${L(SELLER.addrAr,SELLER.addrEn)}</div><div class="tiny">${L('الرقم الضريبي','VAT no.')}: <span class="num">${SELLER.vat}</span></div><div class="tiny">${L('السجل التجاري','CR no.')}: <span class="num">${SELLER.cr}</span></div><div style="margin-top:6px;font-weight:700">${L('فاتورة ضريبية مبسطة','Simplified Tax Invoice')}</div></div>
+      <hr>
+      <table><tr><td>${L('الطاولة','Table')}</td><td class="num" style="font-weight:700;font-size:16px">${esc(n)}</td></tr><tr><td>${L('الطلبات','Orders')}</td><td class="num">${os.map(o=>'#'+o.no).join(' ')}</td></tr><tr><td>${L('التاريخ','Date')}</td><td class="num">${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</td></tr></table>
+      <hr>
+      <table>${lines.map(l=>`<tr><td><span class="num">${l.qty}×</span> ${esc(nm(l))}${l.mods.length?`<div class="tiny">${esc(modsTxt(l.mods))}</div>`:''}</td><td class="num">${fmt(l.unit*l.qty)}</td></tr>`).join('')}</table>
+      <hr>
+      <table><tr><td>${L('المجموع غير شامل الضريبة','Total excl. VAT')}</td><td class="num">${fmt(total-vat)}</td></tr><tr><td>${L('ضريبة القيمة المضافة 15%','VAT 15%')}</td><td class="num">${fmt(vat)}</td></tr><tr style="font-weight:700;font-size:15px"><td>${L('الإجمالي شامل الضريبة','Total incl. VAT')}</td><td class="num">${fmt(total)}</td></tr></table>
+      <div class="qr" id="qr"></div>
+      <p class="c tiny" style="margin:8px 0 0">${L('شكراً لزيارتكم','Thank you for visiting')}</p>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px"><button class="btn" id="tbprint" style="flex:1">🖨️ ${L('طباعة فاتورة الطاولة','Print table bill')}</button></div>
+    <div class="acts"><button class="btn ghost" id="tbno">${L('رجوع','Back')}</button><button class="btn crust" id="tbclose">${L('إغلاق حساب الطاولة','Close the table')}</button></div>
+    <p class="note" style="margin-top:6px">${L('إغلاق الحساب يفضّي الطاولة. الطلبات تبقى محفوظة في الفواتير والتقارير.','Closing the table frees it. The orders stay in invoices and reports.')}</p>
+  </div></div>`;
+  try{new QRCode(document.getElementById('qr'),{text:tlv([SELLER.ar,SELLER.vat,d.toISOString(),total.toFixed(2),vat.toFixed(2)]),width:240,height:240,correctLevel:QRCode.CorrectLevel.M})}catch(e){}
+  document.getElementById('tbprint').onclick=async e=>{const b=e.currentTarget;
+    if(printerOn()){b.disabled=true;try{await eposSend([await canvasOf(document.getElementById('rcpt'))]);toast(L('انطبعت فاتورة الطاولة','Table bill printed'))}catch(err){toast(printErrText(err))}finally{b.disabled=false}}
+    else{document.body.classList.add('printing-rcpt');setTimeout(()=>{window.print();setTimeout(()=>document.body.classList.remove('printing-rcpt'),500)},50)}};
+  Ly.onclick=e=>{
+    if(e.target.id==='scrim'||e.target.closest('#tbback,#tbno')){Ly.innerHTML='';return}
+    if(e.target.closest('#tbclose')){const t=Date.now();os.forEach(o=>{o.billed=true;o.billedAt=t;writeOrder(o,{billed:true,billedAt:t})});Ly.innerHTML='';toast(L('انقفل حساب الطاولة ','Table closed: ')+n);drawTables();updateBadge()}
+  };
+}
 
 // ---------- Ready orders ----------
 let rtimer=null;
@@ -1604,6 +1674,7 @@ function applyLang(){
   document.getElementById('n-kitchen').textContent=L('المطبخ','Kitchen');
   document.getElementById('n-menu').textContent=L('المنيو','Menu');
   document.getElementById('n-bar').textContent=L('البار','Bar');
+  document.getElementById('n-tables').textContent=L('الطاولات','Tables');
   document.getElementById('n-ready').textContent=L('الطلبات الجاهزة','Ready orders');
   document.getElementById('n-sales').textContent=L('سجل المبيعات','Sales log');
   document.getElementById('n-invoices').textContent=L('الفواتير','Invoices');
@@ -1614,7 +1685,7 @@ function applyLang(){
   b.setAttribute('aria-label',EN()?'التبديل إلى العربية':'Switch to English');
 }
 document.getElementById('langbtn').onclick=()=>{LANG=EN()?'ar':'en';try{localStorage.setItem('yana-lang',LANG)}catch(e){}applyLang();route(true)};
-const VIEWS={sales:renderSales,pos:renderPOS,kitchen:renderKitchen,bar:renderBar,ready:renderReady,invoices:renderInvoices,menu:renderMenu,reports:renderReports};
+const VIEWS={tables:renderTables,sales:renderSales,pos:renderPOS,kitchen:renderKitchen,bar:renderBar,ready:renderReady,invoices:renderInvoices,menu:renderMenu,reports:renderReports};
 function route(keepScroll){
   let v=(location.hash||'#pos').slice(1);
   applyRole();
