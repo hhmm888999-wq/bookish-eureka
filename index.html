@@ -813,7 +813,7 @@ function rasterB64(src){
   const cv=document.createElement('canvas');cv.width=W;cv.height=H;const x=cv.getContext('2d');
   x.fillStyle='#fff';x.fillRect(0,0,W,H);x.drawImage(src,0,0,W,H);
   const d=x.getImageData(0,0,W,H).data,bpr=W/8,out=new Uint8Array(bpr*H);
-  for(let y=0;y<H;y++)for(let i=0;i<W;i++){const p=(y*W+i)*4;const a=d[p+3]/255;const lum=(0.299*d[p]+0.587*d[p+1]+0.114*d[p+2])*a+255*(1-a);if(lum<150)out[y*bpr+(i>>3)]|=0x80>>(i&7)}
+  for(let y=0;y<H;y++)for(let i=0;i<W;i++){const p=(y*W+i)*4;const a=d[p+3]/255;const lum=(0.299*d[p]+0.587*d[p+1]+0.114*d[p+2])*a+255*(1-a);if(lum<185)out[y*bpr+(i>>3)]|=0x80>>(i&7)}
   let s='';for(let i=0;i<out.length;i+=0x8000)s+=String.fromCharCode.apply(null,out.subarray(i,i+0x8000));
   return {w:W,h:H,b64:btoa(s)};
 }
@@ -842,9 +842,10 @@ const drinkLines=o=>o.lines.filter(l=>l.st==='b').concat(o.lines.flatMap(l=>l.mo
 function ticketLines(o,station){if(station==='b')return drinkLines(o);if(station==='k')return o.lines.filter(l=>l.st==='k');return o.lines.filter(l=>l.st!=='v')}
 async function ticketCanvas(o,station='all'){
   const box=document.createElement('div');
-  box.style.cssText='position:fixed;left:-10000px;top:0;width:380px;background:#fff;color:#000;padding:10px;font:600 20px/1.35 "IBM Plex Sans Arabic",Tahoma,sans-serif;direction:'+(EN()?'ltr':'rtl');
+  box.style.cssText='position:fixed;left:-10000px;top:0;width:380px;background:#fff;color:#000;padding:10px;font:700 21px/1.4 "IBM Plex Sans Arabic",Tahoma,sans-serif;direction:'+(EN()?'ltr':'rtl');
   const lines=ticketLines(o,station);
-  box.innerHTML=`${station==='b'?`<div style="text-align:center;font-size:20px;font-weight:700;background:#000;color:#fff;padding:2px">${L('البار','BAR')}</div>`:station==='k'?`<div style="text-align:center;font-size:20px;font-weight:700;background:#000;color:#fff;padding:2px">${L('المطبخ','KITCHEN')}</div>`:''}<div style="text-align:center;font-size:44px;font-weight:700">#${o.no}</div>
+  const hdr=t=>`<div style="text-align:center;font-size:30px;font-weight:700;border:4px solid #000;border-radius:6px;padding:2px 0;margin-bottom:6px">${t}</div>`;
+  box.innerHTML=`${station==='b'?hdr(L('البار','BAR')):station==='k'?hdr(L('المطبخ','KITCHEN')):''}<div style="text-align:center;font-size:44px;font-weight:700">#${o.no}</div>
    <div style="text-align:center;font-size:24px;font-weight:700;border-bottom:3px solid #000;padding-bottom:6px">${esc(typeName(o))}</div>
    <div style="text-align:center;font-size:16px;margin:4px 0 8px">${new Date(o.t).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}${o.by?' · '+esc(o.by):''}</div>
    ${lines.map(l=>`<div style="border-bottom:1px dashed #000;padding:6px 0"><div style="font-size:24px;font-weight:700">${l.qty}× ${esc(l.id?nm(l):modN(l.name))}</div>${l.mods.length?`<div style="font-size:18px">${esc(modsTxt(l.mods))}</div>`:''}${l.note?`<div style="font-size:19px;font-weight:700">✎ ${esc(l.note)}</div>`:''}</div>`).join('')}`;
@@ -1190,6 +1191,7 @@ async function placeOrder(){
   showReceipt(o);drawGrid();drawTicket();drawStart();updateBadge();
   const pc=printerCfg();
   const wantMain=printerOn()&&(pc.autoInvoice||pc.autoKitchen),wantBar=barPrinterOn()&&pc.autoBar;
+  window.__printed=window.__printed||new Set();if(window.__printed.has(o.id))return;window.__printed.add(o.id);
   if(wantMain||wantBar)setTimeout(()=>printOrder(o,{invoice:printerOn()&&pc.autoInvoice,kitchen:printerOn()&&pc.autoKitchen,bar:wantBar}).catch(e=>toast(printErrText(e))),400);
 }
 function tlv(fields){const enc=new TextEncoder();const parts=[];fields.forEach((v,i)=>{const b=enc.encode(String(v));parts.push(i+1,b.length,...b)});let s='';parts.forEach(c=>s+=String.fromCharCode(c));return btoa(s)}
