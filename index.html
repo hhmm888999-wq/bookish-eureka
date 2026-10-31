@@ -886,7 +886,7 @@ function dayCSV(s){
   rows.push([L('الإجمالي','Total'),'',s.pieces,s.total.toFixed(2)]);
   return '\ufeff'+rows.map(r=>r.map(q).join(',')).join('\r\n');
 }
-function reportButtons(){return `<div class="acts" style="margin-top:12px"><button class="btn ghost" id="rpcsv">${L('حفظ Excel','Save Excel')}</button><button class="btn ghost" id="rppdf">${L('حفظ PDF','Save PDF')}</button></div><p class="note" id="rpnote" style="margin:4px 0 0"></p>`}
+function reportButtons(){return `<div class="acts" style="margin-top:12px">${printerOn()?`<button class="btn" id="rpprint">🖨️ ${L('طباعة','Print')}</button>`:''}<button class="btn ghost" id="rpcsv">${L('حفظ Excel','Save Excel')}</button><button class="btn ghost" id="rppdf">${L('حفظ PDF','Save PDF')}</button></div><p class="note" id="rpnote" style="margin:4px 0 0"></p>`}
 function wireReport(s){
   const save_=async(kind)=>{const note=document.getElementById('rpnote');
     try{
@@ -894,9 +894,18 @@ function wireReport(s){
       if(kind==='csv')await saveFile(name+'.csv',dayCSV(s));
       else{const el=document.getElementById('dsumbox');const c=await html2canvas(el,{scale:2,backgroundColor:'#ffffff'});const w=190,hh=c.height*w/c.width;const pdf=new window.jspdf.jsPDF({unit:'mm',format:[210,Math.max(297,hh+20)]});pdf.addImage(c.toDataURL('image/jpeg',0.92),'JPEG',10,10,w,hh);await saveFile(name+'.pdf',pdf.output('blob'))}
       toast(L('تم حفظ التقرير','Report saved'))}catch(err){note.textContent=err&&err.code==='declined'?L('تم إلغاء الحفظ.','Save cancelled.'):L('ما قدرنا نحفظ الملف، حاول مرة ثانية.','Could not save the file. Try again.')}};
+  const pp=document.getElementById('rpprint');if(pp)pp.onclick=()=>printDayReport().then(()=>toast(L('انطبع التقرير','Report printed'))).catch(e=>toast(printErrText(e)));
   const a=document.getElementById('rpcsv'),b=document.getElementById('rppdf');if(a)a.onclick=()=>save_('csv');if(b)b.onclick=()=>save_('pdf');
 }
 let closingBy='';
+async function printDayReport(){
+  const el=document.getElementById('dsumbox');if(!el)return;
+  const box=el.cloneNode(true);box.removeAttribute('id');
+  box.style.cssText='position:fixed;left:-10000px;top:0;width:420px;background:#fff;color:#000;padding:10px;font:14px/1.45 "IBM Plex Sans Arabic",Tahoma,sans-serif';
+  box.querySelectorAll('*').forEach(n=>{n.style.color='#000';n.style.background='transparent';n.style.borderColor='#000'});
+  document.body.appendChild(box);
+  try{const c=await canvasOf(box);await eposSend([c])}finally{box.remove()}
+}
 function openCloseDay(){
   const s=daySummary(S.day.startAt,Date.now());
   const Ly=document.getElementById('layer');
@@ -916,6 +925,7 @@ function openCloseDay(){
       cart=[];otype='';table='';appNo='';
       Ly.innerHTML=`<div class="scrim"><div class="sheet wide" role="dialog" aria-modal="true"><div id="dsumbox" class="printbox"><h3>${L('تقرير إغلاق اليوم','Day close report')} · ${L(SELLER.shopAr,SELLER.shopEn)}</h3>${summaryHTML(fin)}</div>${reportButtons()}<div class="acts"><button class="btn" id="cddone">${L('تم','Done')}</button></div></div></div>`;
       wireReport(fin);
+      if(printerOn())setTimeout(()=>printDayReport().then(()=>toast(L('انطبع تقرير إغلاق اليوم','Day close report printed'))).catch(e=>toast(printErrText(e))),300);
       Ly.onclick=ev=>{if(ev.target.closest('#cddone')){Ly.innerHTML='';route()}};
     }
   };
