@@ -464,6 +464,7 @@ table.sheet-t{width:100%;border-collapse:collapse;font-size:14px;min-width:560px
       <a href="#menu"><span id="n-menu">المنيو</span></a>
       <a href="#reports"><span id="n-reports">التقارير</span></a>
     </nav>
+    <span class="chip" id="stbadge" hidden style="background:var(--brand-ink);color:var(--brand)">🖨️ جهاز الطباعة</span>
     <span class="syncdot off" id="syncdot" role="status">هذا الجهاز فقط</span>
     <button class="langbtn" id="langbtn" lang="en">English</button>
   </div>
@@ -593,7 +594,7 @@ let metaTimer=null;
 function saveMeta(){S.touched=true;save();if(!DB)return;clearTimeout(metaTimer);metaTimer=setTimeout(()=>queueWrite('meta/state',{op:'set',data:metaBody()}),300)}
 function applyMeta(m){
   if(m.prices)S.items.forEach(i=>{if(m.prices[i.id]!=null)i.price=m.prices[i.id]});
-  S.off=clone(m.off||{});S.custom=clone(m.custom||[]);if(m.tables)S.tables=m.tables;S.day=clone(m.day||{open:false});S.days=clone(m.days||[]);if(m.staff)S.staff=clone(m.staff);if(m.printer)S.printer=clone(m.printer);save();fixManagerPin();
+  S.off=clone(m.off||{});S.custom=clone(m.custom||[]);if(m.tables)S.tables=m.tables;S.day=clone(m.day||{open:false});S.days=clone(m.days||[]);if(m.staff)S.staff=clone(m.staff);if(m.printer)S.printer=clone(m.printer);save();if(typeof applyStationBadge==='function')applyStationBadge();fixManagerPin();
 }
 const maxNo=()=>S.orders.reduce((m,o)=>Math.max(m,o.no||0),100);
 async function nextNo(){
@@ -685,7 +686,7 @@ function startSync(db,orderLimit){
     S.orders=q.docs.map(d=>clone(d.data())).reverse();
     // an order whose stations are all done is ready, whichever device finished last
     S.orders.forEach(o=>{if(o.status==='open'&&o.kds&&Object.keys(o.kds).length&&Object.values(o.kds).every(v=>v==='ready')){o.status='ready';o.readyAt=o.readyAt||Date.now();queueWrite('orders/'+o.id,{op:'update',data:{status:'ready',readyAt:o.readyAt}})}});
-    S.no=Math.max(S.no,maxNo());save();setSync('on');refreshView('orders');
+    S.no=Math.max(S.no,maxNo());save();setSync('on');refreshView('orders');stationTick();
   },()=>setSync('error'));
   })();
 }
@@ -856,17 +857,48 @@ async function ticketCanvas(o,station='all'){
   document.body.appendChild(box);
   try{return await canvasOf(box)}finally{box.remove()}
 }
+async function invoiceCanvas(o){
+  const vat=o.total*15/115,d=new Date(o.t);
+  const box=document.createElement('div');box.className='receipt';
+  box.style.cssText='position:fixed;left:-10000px;top:0;width:330px;max-width:none';
+  box.innerHTML=`<div class="c"><h5>${L(SELLER.shopAr,SELLER.shopEn)}</h5><div>YANA Bakery &amp; Cafe</div><div class="tiny">${SELLER.ar}</div><div class="tiny">${L(SELLER.addrAr,SELLER.addrEn)}</div><div class="tiny">${L('الرقم الضريبي','VAT no.')}: ${SELLER.vat}</div><div class="tiny">${L('السجل التجاري','CR no.')}: ${SELLER.cr}</div><div style="margin-top:6px;font-weight:700">${L('فاتورة ضريبية مبسطة','Simplified Tax Invoice')}</div></div><hr>
+   <table><tr><td>${L('رقم الطلب','Order no.')}</td><td>#${o.no}</td></tr><tr><td>${L('التاريخ','Date')}</td><td>${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</td></tr><tr><td>${L('النوع','Type')}</td><td>${esc(typeName(o))}</td></tr></table><hr>
+   <table>${o.lines.map(l=>`<tr><td>${l.qty}× ${esc(biAr(l))}${biEn(l)?`<div class="tiny" dir="ltr" style="text-align:start">${esc(biEn(l))}</div>`:''}${l.mods.length?`<div class="tiny">${esc(biMods(l.mods).ar)} · <span dir="ltr">${esc(biMods(l.mods).en)}</span></div>`:''}${l.note?`<div class="tiny">${L('ملاحظة:','Note:')} ${esc(l.note)}</div>`:''}</td><td>${fmt(l.unit*l.qty)}</td></tr>`).join('')}</table><hr>
+   <table><tr><td>${L('المجموع غير شامل الضريبة','Total excl. VAT')}</td><td>${fmt(o.total-vat)}</td></tr><tr><td>${L('ضريبة القيمة المضافة 15%','VAT 15%')}</td><td>${fmt(vat)}</td></tr><tr style="font-weight:700;font-size:15px"><td>${L('الإجمالي شامل الضريبة','Total incl. VAT')}</td><td>${fmt(o.total)}</td></tr></table><div class="qr"></div>`;
+  document.body.appendChild(box);
+  try{new QRCode(box.querySelector('.qr'),{text:tlv([SELLER.ar,SELLER.vat,d.toISOString(),o.total.toFixed(2),vat.toFixed(2)]),width:240,height:240,correctLevel:QRCode.CorrectLevel.M})}catch(e){}
+  try{return await canvasOf(box)}finally{box.remove()}
+}
 async function printOrder(o,{invoice=true,kitchen=false,bar=false}={}){
   const cs=[];
   // with a bar printer, the kitchen ticket carries food only; drinks go to the bar printer
   const kStation=barPrinterOn()?'k':'all';
-  if(invoice){const el=document.getElementById('rcpt');if(el)cs.push(await canvasOf(el))}
+  if(invoice)cs.push(await invoiceCanvas(o));
   if(kitchen&&ticketLines(o,kStation).length)cs.push(await ticketCanvas(o,kStation));
   const jobs=[];
   if(cs.length)jobs.push(eposSend(cs));
   if(bar&&barPrinterOn()&&drinkLines(o).length)jobs.push(ticketCanvas(o,'b').then(c=>eposSend([c],printerCfg().barIp)).catch(e=>{throw new Error((e.message||'')+'|bar')}));
   const rs=await Promise.allSettled(jobs);const bad=rs.find(r=>r.status==='rejected');if(bad)throw bad.reason;
 }
+
+// ---------- print station ----------
+let IS_STATION=false;try{IS_STATION=localStorage.getItem('yana-printstation')==='1'}catch(e){}
+const PAGE_START=Date.now();
+const stationMode=()=>!!printerCfg().station;
+function autoPrintJobs(){const pc=printerCfg();return {invoice:printerOn()&&pc.autoInvoice,kitchen:printerOn()&&pc.autoKitchen,bar:barPrinterOn()&&pc.autoBar}}
+function stationTick(){
+  if(!IS_STATION||!stationMode())return;
+  const j=autoPrintJobs();if(!j.invoice&&!j.kitchen&&!j.bar)return;
+  window.__printed=window.__printed||new Set();
+  const since=Math.max(Date.now()-15*60e3,PAGE_START-2*60e3);
+  S.orders.filter(o=>!o.printed&&o.t>=since&&!window.__printed.has(o.id)).sort((a,b)=>a.t-b.t).forEach(o=>{
+    window.__printed.add(o.id);o.printed=true;writeOrder(o,{printed:true});
+    printOrder(o,j).then(()=>toast(L('انطبع الطلب #','Printed order #')+o.no)).catch(e=>toast(printErrText(e)));
+  });
+}
+async function keepAwake(){try{if(IS_STATION&&navigator.wakeLock)window.__wl=await navigator.wakeLock.request('screen')}catch(e){}}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')keepAwake()});
+function applyStationBadge(){const b=document.getElementById('stbadge');if(b){b.hidden=!(IS_STATION&&stationMode());b.textContent='🖨️ '+L('جهاز الطباعة','Print device')}}
 
 // ---------- business day ----------
 const dayOpen=()=>!!(S.day&&S.day.open);
@@ -1190,13 +1222,15 @@ async function placeOrder(){
   const cw=curWaiter();if(cw){o.by=cw.name;o.byId=cw.id}
   o.no=await nextNo();
   pushOrder(o,true);
+  const printHere=!stationMode()||IS_STATION;
+  if(printHere)o.printed=true;
   S.touched=true;writeOrder(o);
   cart=[];table='';appNo='';otype='';choosing=false;pending='';ticketOpen=false;placing=false;
   showReceipt(o);drawGrid();drawTicket();drawStart();updateBadge();
-  const pc=printerCfg();
-  const wantMain=printerOn()&&(pc.autoInvoice||pc.autoKitchen),wantBar=barPrinterOn()&&pc.autoBar;
+  if(!printHere){toast(L('انرسل الطلب لجهاز الطباعة','Order sent to the print device'));return}
+  const j=autoPrintJobs();
   window.__printed=window.__printed||new Set();if(window.__printed.has(o.id))return;window.__printed.add(o.id);
-  if(wantMain||wantBar)setTimeout(()=>printOrder(o,{invoice:printerOn()&&pc.autoInvoice,kitchen:printerOn()&&pc.autoKitchen,bar:wantBar}).catch(e=>toast(printErrText(e))),400);
+  if(j.invoice||j.kitchen||j.bar)setTimeout(()=>printOrder(o,j).catch(e=>toast(printErrText(e))),400);
 }
 function tlv(fields){const enc=new TextEncoder();const parts=[];fields.forEach((v,i)=>{const b=enc.encode(String(v));parts.push(i+1,b.length,...b)});let s='';parts.forEach(c=>s+=String.fromCharCode(c));return btoa(s)}
 function waNum(v){let d=String(v).replace(/[^0-9]/g,'');if(d.startsWith('00'))d=d.slice(2);if(d.startsWith('05'))d='966'+d.slice(1);else if(d.startsWith('5')&&d.length===9)d='966'+d;return /^9665[0-9]{8}$/.test(d)?d:''}
@@ -1571,7 +1605,12 @@ function renderMenu(){
    <div class="toolbar" style="margin:0 0 6px"><label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="prinv" ${printerCfg().autoInvoice?'checked':''}> ${L('اطبع الفاتورة تلقائياً عند الإرسال','Print the invoice automatically when sent')}</label><label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="prkit" ${printerCfg().autoKitchen?'checked':''}> ${L('اطبع تذكرة المطبخ تلقائياً','Print the kitchen ticket automatically')}</label></div>
    <h3 style="margin:14px 0 8px;font-size:15px">🥤 ${L('طابعة البار (المشروبات)','Bar printer (drinks)')}</h3>
    <div class="toolbar" style="margin:0 0 6px"><label for="prbip" style="font-size:13.5px;color:var(--muted)">${L('عنوان طابعة البار (IP)','Bar printer address (IP)')}</label><input id="prbip" dir="ltr" inputmode="decimal" placeholder="192.168.100.27" value="${esc(printerCfg().barIp)}" style="width:170px"><button class="btn ghost sm" id="prbtest" type="button">${L('طباعة تجربة','Test print')}</button>${printerCfg().barIp?`<a href="https://${esc(printerCfg().barIp)}/" target="_blank" rel="noopener" style="font-size:13px">${L('فتح طابعة البار لقبول الشهادة','Open bar printer to accept certificate')}</a>`:''}</div>
-   <div class="toolbar" style="margin:0 0 16px"><label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="prbar" ${printerCfg().autoBar?'checked':''}> ${L('اطبع المشروبات تلقائياً في طابعة البار عند الإرسال','Print drinks automatically on the bar printer when sent')}</label></div>`:''}
+   <div class="toolbar" style="margin:0 0 6px"><label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="prbar" ${printerCfg().autoBar?'checked':''}> ${L('اطبع المشروبات تلقائياً في طابعة البار عند الإرسال','Print drinks automatically on the bar printer when sent')}</label></div>
+   <h3 style="margin:14px 0 8px;font-size:15px">📟 ${L('جهاز الطباعة','Print device')}</h3>
+   <div class="toolbar" style="margin:0 0 6px"><label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="prst" ${stationMode()?'checked':''}> ${L('جهاز واحد يطبع كل الطلبات من كل الأجهزة','One device prints every order from all devices')}</label></div>
+   ${stationMode()?`<div class="toolbar" style="margin:0 0 6px"><span class="chip ${IS_STATION?'prep':''}" style="font-size:13px">${IS_STATION?L('✅ هذا الجهاز هو جهاز الطباعة','✅ This device is the print device'):L('هذا الجهاز يرسل بس، ما يطبع','This device only sends, it does not print')}</span><button class="btn ghost sm" id="prme" type="button">${IS_STATION?L('إلغاء جهاز الطباعة هنا','Stop printing here'):L('اجعل هذا الجهاز جهاز الطباعة','Make this the print device')}</button></div>
+   <p class="note" style="margin:0 0 6px">${L('خلّ التطبيق مفتوح على جهاز الطباعة والشاشة شغّالة، وعلى WiFi المحل.','Keep the app open on the print device with the screen on and on the shop WiFi.')}</p>`:''}
+   <div style="height:10px"></div>`:''}
    <div class="toolbar" style="margin:0"><label for="tcount" style="font-size:14px;font-weight:600">${L('عدد الطاولات في المحل','Number of tables')}</label><input id="tcount" type="number" min="1" max="60" value="${tableCount()}" style="width:80px"></div>
   </div>
   <div class="panel">
@@ -1600,6 +1639,8 @@ function renderMenu(){
     const cleanIp=v=>v.trim().replace(/^https?:\/\//,'').replace(/\/.*$/,'');
     document.getElementById('prbip').onchange=e=>{printerCfg().barIp=cleanIp(e.target.value);saveMeta();toast(L('تم حفظ عنوان طابعة البار','Bar printer address saved'));renderMenu()};
     document.getElementById('prbar').onchange=e=>{printerCfg().autoBar=e.target.checked;saveMeta()};
+    document.getElementById('prst').onchange=e=>{printerCfg().station=e.target.checked;saveMeta();applyStationBadge();renderMenu()};
+    const pm=document.getElementById('prme');if(pm)pm.onclick=()=>{IS_STATION=!IS_STATION;try{localStorage.setItem('yana-printstation',IS_STATION?'1':'0')}catch(e){}if(IS_STATION){keepAwake();stationTick()}applyStationBadge();renderMenu()};
     document.getElementById('prbtest').onclick=async e=>{const b=e.currentTarget;b.disabled=true;
       const box=document.createElement('div');box.style.cssText='position:fixed;left:-10000px;top:0;width:380px;background:#fff;color:#000;padding:12px;text-align:center;font:700 26px/1.5 Tahoma,sans-serif';
       box.innerHTML=`<div style="font-size:40px">${L('البار','BAR')}</div><div>${L('تجربة طابعة البار ✓','Bar printer test ✓')}</div><div style="font-size:18px">${new Date().toLocaleString('en-GB')}</div>`;document.body.appendChild(box);
@@ -1685,7 +1726,7 @@ function applyLang(){
   document.getElementById('n-sales').textContent=L('سجل المبيعات','Sales log');
   document.getElementById('n-invoices').textContent=L('الفواتير','Invoices');
   document.getElementById('n-reports').textContent=L('التقارير','Reports');
-  setSync(SYNC);applyRole();
+  setSync(SYNC);applyRole();applyStationBadge();
   const b=document.getElementById('langbtn');
   b.textContent=EN()?'العربية':'English';b.lang=EN()?'ar':'en';
   b.setAttribute('aria-label',EN()?'التبديل إلى العربية':'Switch to English');
@@ -1707,7 +1748,7 @@ function route(keepScroll){
 }
 window.addEventListener('hashchange',()=>route());
 document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;const b=document.querySelector('#layer .backbtn');if(b){b.click();return}if(ticketOpen){ticketOpen=false;drawTicket()}});
-fixManagerPin();
+fixManagerPin();keepAwake();
 applyLang();
 route();
 setSync('local');connectDB();
